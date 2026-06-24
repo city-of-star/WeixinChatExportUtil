@@ -103,6 +103,11 @@
 
           <div id="detectResults" class="detect-results hidden"></div>
 
+          <div class="wx-path-tip">
+            <strong>如何找到数据目录？</strong>
+            <p>打开微信「设置 → 账号与存储 → 存储位置」，进入该路径下的 <code>xwechat_files</code> 文件夹，即为所需目录。</p>
+          </div>
+
           <label class="field">
             <span class="label">微信数据目录</span>
             <div class="input-row">
@@ -126,9 +131,9 @@
             <ul id="readinessSuggestions" class="readiness-list"></ul>
           </div>
 
-          <div id="cacheHint" class="cache-hint hidden">
-            <span id="cacheHintText"></span>
-            <button id="useCacheBtn" class="btn secondary" type="button">使用上次结果</button>
+          <div id="cacheSection" class="cache-section hidden">
+            <span class="label">上次扫描结果</span>
+            <div id="cacheList" class="cache-list"></div>
           </div>
 
           <div class="actions">
@@ -187,31 +192,6 @@
             </div>
             <small class="hint">建议勾选 HTML，导出后双击 <code>index.html</code> 即可浏览聊天记录</small>
           </div>
-
-          <details class="advanced">
-            <summary>高级选项</summary>
-            <div class="advanced-body">
-              <label class="field">
-                <span class="label">当前账号 ID（一般留空）</span>
-                <input id="selfWxid" type="text" placeholder="留空则自动识别" />
-              </label>
-              <label class="field">
-                <span class="label">密钥文件（一般留空）</span>
-                <div class="input-row">
-                  <input id="keysPath" type="text" placeholder="all_keys.json，留空则自动获取" />
-                  <button id="pickKeysPath" class="btn secondary" type="button">浏览</button>
-                </div>
-              </label>
-              <label class="field checkbox-field">
-                <input id="loginCapture" type="checkbox" checked />
-                <span>登录时自动获取解密密钥（微信 4.1.10+ 建议开启，需管理员权限）</span>
-              </label>
-              <label class="field checkbox-field">
-                <input id="forceDecrypt" type="checkbox" />
-                <span>强制重新解密数据库</span>
-              </label>
-            </div>
-          </details>
 
           <div class="actions">
             <button id="exportBackBtn" class="btn secondary" type="button">上一步</button>

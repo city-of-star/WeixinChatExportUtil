@@ -10,13 +10,10 @@ const scanToastMessage = document.getElementById('scanToastMessage');
 const cancelScanBtn = document.getElementById('cancelScanBtn');
 const scanToastElapsed = document.getElementById('scanToastElapsed');
 const scanToastNote = document.getElementById('scanToastNote');
-const cacheHint = document.getElementById('cacheHint');
-const cacheHintText = document.getElementById('cacheHintText');
-const useCacheBtn = document.getElementById('useCacheBtn');
+const cacheSection = document.getElementById('cacheSection');
+const cacheList = document.getElementById('cacheList');
 const rescanBtn = document.getElementById('rescanBtn');
-const keysPathInput = document.getElementById('keysPath');
 const outputDirInput = document.getElementById('outputDir');
-const selfWxidInput = document.getElementById('selfWxid');
 const wxDirHint = document.getElementById('wxDirHint');
 const readinessPanel = document.getElementById('readinessPanel');
 const readinessBadge = document.getElementById('readinessBadge');
@@ -66,6 +63,7 @@ let userCancelledScan = false;
 let scanElapsedTimer = null;
 let scanStartedAt = 0;
 let currentConversationCache = null;
+let conversationCacheEntries = [];
 const accountProfileCache = new Map();
 let profileLoadToken = 0;
 
@@ -115,10 +113,6 @@ function saveSettings() {
   const settings = {
     wxDir: wxDirInput.value.trim(),
     outputDir: outputDirInput.value.trim(),
-    selfWxid: selfWxidInput.value.trim(),
-    keysPath: keysPathInput.value.trim(),
-    loginCapture: document.getElementById('loginCapture').checked,
-    forceDecrypt: document.getElementById('forceDecrypt').checked,
     formats: getSelectedFormats(),
     accountPath: selectedAccountPath,
     disclaimerAccepted: disclaimerAccepted.checked,
@@ -130,14 +124,6 @@ function saveSettings() {
 function applySettingsToForm(settings) {
   if (settings.wxDir) wxDirInput.value = settings.wxDir;
   if (settings.outputDir) outputDirInput.value = settings.outputDir;
-  if (settings.selfWxid) selfWxidInput.value = settings.selfWxid;
-  if (settings.keysPath) keysPathInput.value = settings.keysPath;
-  if (typeof settings.loginCapture === 'boolean') {
-    document.getElementById('loginCapture').checked = settings.loginCapture;
-  }
-  if (typeof settings.forceDecrypt === 'boolean') {
-    document.getElementById('forceDecrypt').checked = settings.forceDecrypt;
-  }
   if (Array.isArray(settings.formats)) {
     for (const input of document.querySelectorAll('input[name="format"]')) {
       input.checked = settings.formats.includes(input.value);
@@ -327,9 +313,6 @@ async function selectAccount(accountPath) {
   const rootDir = wxDirInput.value.trim();
   if (!rootDir) return;
 
-  const account = scannedAccounts.find((item) => item.path === accountPath);
-  applySelectedAccount(account);
-
   const status = await window.exporter.checkWeChatStatus({
     wxDir: rootDir,
     accountPath,
@@ -340,13 +323,6 @@ async function selectAccount(accountPath) {
     renderReadiness(null);
   }
   void refreshConversationCacheHint();
-}
-
-function applySelectedAccount(account) {
-  if (!account) return;
-  if (!selfWxidInput.value.trim()) {
-    selfWxidInput.placeholder = account.wxid;
-  }
 }
 
 function renderReadiness(readiness) {
@@ -419,7 +395,6 @@ async function validateWxDir(dir, accountPath = null) {
   updateAccountCardSelection();
   wxDirHint.textContent = result.hint || '已识别微信账号';
   wxDirHint.className = 'hint ok';
-  applySelectedAccount(result.selectedAccount);
   renderReadiness(result.readiness);
   void refreshConversationCacheHint();
   return result;
@@ -538,10 +513,10 @@ function getExportOptions() {
     wxDir: wxDirInput.value.trim(),
     accountPath: resolvedAccountPath || getSelectedAccountPath(),
     outputDir: outputDirInput.value.trim(),
-    selfWxid: selfWxidInput.value.trim() || null,
-    forceDecrypt: document.getElementById('forceDecrypt').checked,
-    loginCapture: document.getElementById('loginCapture').checked,
-    keysPath: keysPathInput.value.trim() || null,
+    selfWxid: null,
+    forceDecrypt: false,
+    loginCapture: true,
+    keysPath: null,
     formats: getSelectedFormats(),
     selectedUsernames: getSelectedUsernames(),
   };
@@ -567,13 +542,51 @@ function formatCacheTime(iso) {
   });
 }
 
+function sanitizeScanMessage(msg) {
+  return msg
+    .replace(/db_storage[^\s]*/g, '数据')
+    .replace(/\.wexin_passphrase/g, '密钥')
+    .replace(/Weixin\.dll/g, '微信组件')
+    .replace(/Weixin\.exe/g, '微信');
+}
+
 function friendlyScanMessage(event) {
   const msg = event?.message || '';
-  if (event?.phase === 'decrypt' && event.current && event.total) {
+  const phase = event?.phase || '';
+
+  if (phase === 'decrypt' && event.current && event.total) {
     return `正在解密数据（${event.current}/${event.total}）…`;
   }
-  if (msg.includes('提取数据库密钥') || msg.includes('密钥')) {
-    return '正在获取解密密钥…';
+
+  if (phase === 'keys' && msg) {
+    if (msg.includes('Hook 已就绪') || msg.includes('请点击「登录」') || msg.includes('点击「登录」')) {
+      return 'Hook 已就绪，请在微信窗口点击「登录」（通常无需扫码）';
+    }
+    if (msg.includes('请先不要点击') || msg.includes('不要点击登录') || msg.includes('等待提示后再点击')) {
+      return '正在安装 Hook，请先不要点击「登录」…';
+    }
+    if (msg.includes('等待密钥') || msg.includes('仍在捕获')) {
+      return sanitizeScanMessage(msg);
+    }
+    if (msg.includes('正在安装 Hook') || msg.includes('Hook 尚未就绪') || msg.includes('等待微信组件')) {
+      return '正在安装 Hook，请先不要点击「登录」…';
+    }
+    if (msg.includes('已启动微信') || msg.includes('等待微信启动') || msg.includes('未检测到 Weixin')) {
+      return sanitizeScanMessage(msg);
+    }
+    if (msg.includes('已结束进程') || msg.includes('重新启动') || msg.includes('关闭微信')) {
+      return '正在重启微信以捕获密钥…';
+    }
+    if (msg.includes('管理员')) {
+      return sanitizeScanMessage(msg);
+    }
+    if (msg.includes('提取') || msg.includes('密钥') || msg.includes('Hook') || msg.includes('捕获')) {
+      return sanitizeScanMessage(msg);
+    }
+  }
+
+  if (msg.includes('正在从微信进程内存提取数据库密钥')) {
+    return '正在准备获取解密密钥…';
   }
   if (msg.includes('解密数据库文件') || msg.startsWith('解密中')) {
     return '正在解密聊天记录…';
@@ -587,10 +600,52 @@ function friendlyScanMessage(event) {
   if (msg.includes('会话列表') || msg.includes('统计会话')) {
     return '正在整理会话列表…';
   }
-  if (msg.includes('未找到已解密')) {
+  if (msg.includes('未找到已解密') || msg.includes('首次扫描需要解密')) {
     return '首次扫描需要解密，可能需要几分钟…';
   }
-  return msg.replace(/db_storage[^\s]*/g, '数据').replace(/\.wexin_passphrase/g, '密钥') || '处理中…';
+  return sanitizeScanMessage(msg) || '处理中…';
+}
+
+function friendlyScanTitle(event) {
+  const phase = event?.phase || '';
+  const msg = event?.message || '';
+  if (phase === 'keys') return '正在获取密钥';
+  if (phase === 'decrypt') {
+    if (msg.includes('解密中') || msg.includes('解密数据库')) return '正在解密';
+    if (msg.includes('提取') || msg.includes('密钥')) return '正在获取密钥';
+    return '正在解密';
+  }
+  return '正在扫描';
+}
+
+function friendlyScanNote(event) {
+  const msg = event?.message || '';
+  const phase = event?.phase || '';
+
+  if (phase === 'keys') {
+    if (msg.includes('Hook 已就绪') || msg.includes('等待密钥') || msg.includes('仍在捕获') || msg.includes('点击「登录」')) {
+      return '请在弹出的微信窗口点击「登录」。若长时间无响应，请右键本程序「以管理员身份运行」后重试。';
+    }
+    if (
+      msg.includes('请先不要点击') ||
+      msg.includes('不要点击登录') ||
+      msg.includes('正在安装 Hook') ||
+      msg.includes('Hook 尚未就绪') ||
+      msg.includes('后台启动')
+    ) {
+      return '微信已重启，正在安装 Hook。看到「Hook 已就绪」后再点击「登录」，否则无法捕获密钥。';
+    }
+    if (msg.includes('管理员') || msg.includes('安装 Hook')) {
+      return '获取密钥需要管理员权限。请关闭本程序，右键「以管理员身份运行」后再扫描。';
+    }
+    return '工具会暂时关闭并重启微信，Hook 就绪后再点击「登录」。整个过程通常 1～3 分钟。';
+  }
+
+  if (phase === 'decrypt' && (msg.includes('提取') || msg.includes('密钥'))) {
+    return '首次扫描需要获取解密密钥。若弹出微信，请点击「登录」。';
+  }
+
+  return '首次扫描可能需要几分钟。若弹出微信，请点击「登录」';
 }
 
 function startScanElapsedTimer() {
@@ -610,30 +665,118 @@ function stopScanElapsedTimer() {
   scanToastElapsed.textContent = '';
 }
 
+function getParentDir(filePath) {
+  const normalized = filePath.replace(/[/\\]+$/, '');
+  const idx = Math.max(normalized.lastIndexOf('\\'), normalized.lastIndexOf('/'));
+  return idx >= 0 ? normalized.slice(0, idx) : normalized;
+}
+
+function getAccountLabel(accountPath, selfWxid = null) {
+  const account = scannedAccounts.find((item) => item.path === accountPath);
+  if (account?.displayName) {
+    return account.displayName;
+  }
+  if (selfWxid) {
+    return selfWxid;
+  }
+  const folderName = accountPath.split(/[/\\]/).pop() || accountPath;
+  const match = folderName.match(/^(.+?)_c[a-f0-9]+$/i);
+  return match ? match[1] : folderName;
+}
+
 async function refreshConversationCacheHint() {
-  const accountPath = getSelectedAccountPath();
-  if (!accountPath) {
+  const selectedPath = getSelectedAccountPath();
+  const result = await window.exporter.listConversationCaches();
+  if (!result.ok || !result.caches?.length) {
+    conversationCacheEntries = [];
     currentConversationCache = null;
-    cacheHint.classList.add('hidden');
+    cacheSection.classList.add('hidden');
+    cacheList.innerHTML = '';
     scanBtn.textContent = '扫描会话';
     return;
   }
 
-  const result = await window.exporter.loadConversationCache({ accountPath });
-  if (!result.ok || !result.cache?.conversations?.length) {
-    currentConversationCache = null;
-    cacheHint.classList.add('hidden');
-    scanBtn.textContent = '扫描会话';
+  conversationCacheEntries = result.caches;
+  currentConversationCache = selectedPath
+    ? result.caches.find((item) => item.accountPath === selectedPath) || null
+    : null;
+
+  renderConversationCacheList(result.caches, selectedPath);
+  cacheSection.classList.remove('hidden');
+
+  const selectedCache = currentConversationCache;
+  scanBtn.textContent = selectedCache ? '重新扫描' : '扫描会话';
+}
+
+function renderConversationCacheList(caches, selectedPath) {
+  cacheList.innerHTML = '';
+
+  for (const cache of caches) {
+    const item = document.createElement('div');
+    item.className = 'cache-item';
+    if (cache.accountPath === selectedPath) {
+      item.classList.add('selected');
+    }
+    if (cache.stale) {
+      item.classList.add('stale');
+    }
+
+    const info = document.createElement('div');
+    info.className = 'cache-item-info';
+
+    const title = document.createElement('div');
+    title.className = 'cache-item-title';
+    title.textContent = getAccountLabel(cache.accountPath, cache.selfWxid);
+
+    const meta = document.createElement('div');
+    meta.className = 'cache-item-meta';
+    const scannedAt = formatCacheTime(cache.scannedAt);
+    const staleNote = cache.stale ? ' · 可能有新消息' : '';
+    meta.textContent = `${cache.conversationCount} 个会话，约 ${formatCount(cache.totalMessages)} 条消息${scannedAt ? ` · ${scannedAt}` : ''}${staleNote}`;
+
+    info.appendChild(title);
+    info.appendChild(meta);
+    item.appendChild(info);
+
+    const actions = document.createElement('div');
+    actions.className = 'cache-item-actions';
+
+    const useBtn = document.createElement('button');
+    useBtn.className = 'btn secondary';
+    useBtn.type = 'button';
+    useBtn.textContent = '使用';
+    useBtn.addEventListener('click', () => useCachedConversations(cache.accountPath));
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'btn ghost danger-text';
+    deleteBtn.type = 'button';
+    deleteBtn.textContent = '删除';
+    deleteBtn.addEventListener('click', () => deleteConversationCache(cache.accountPath));
+
+    actions.appendChild(useBtn);
+    actions.appendChild(deleteBtn);
+    item.appendChild(actions);
+    cacheList.appendChild(item);
+  }
+}
+
+async function deleteConversationCache(accountPath) {
+  const label = getAccountLabel(accountPath);
+  const confirmed = window.confirm(`确定删除「${label}」的上次扫描结果吗？删除后需要重新扫描才能导出。`);
+  if (!confirmed) {
     return;
   }
 
-  currentConversationCache = result.cache;
-  const scannedAt = formatCacheTime(result.cache.scannedAt);
-  const staleNote = result.cache.stale ? '（可能有新消息，建议重新扫描）' : '';
-  cacheHintText.textContent = `上次扫描：${result.cache.conversationCount} 个会话，约 ${formatCount(result.cache.totalMessages)} 条消息${scannedAt ? ` · ${scannedAt}` : ''}${staleNote}`;
-  cacheHint.classList.remove('hidden');
-  cacheHint.classList.toggle('stale', Boolean(result.cache.stale));
-  scanBtn.textContent = result.cache.stale ? '重新扫描' : '重新扫描';
+  const result = await window.exporter.clearConversationCache({ accountPath });
+  if (!result.ok) {
+    await showFriendlyError('删除失败', result.error || '无法删除扫描缓存');
+    return;
+  }
+
+  if (getSelectedAccountPath() === accountPath) {
+    currentConversationCache = null;
+  }
+  void refreshConversationCacheHint();
 }
 
 function applyConversationScanResult(result, { fromCache = false } = {}) {
@@ -672,31 +815,46 @@ function renderOutputGuide(formats) {
   outputGuide.innerHTML = `<strong>文件说明</strong><ul>${items.map((item) => `<li>${item}</li>`).join('')}</ul>`;
 }
 
-async function useCachedConversations() {
-  if (!currentConversationCache?.conversations?.length) {
-    return;
-  }
-
-  const accountPath = getSelectedAccountPath();
-  if (!accountPath) {
+async function useCachedConversations(accountPath = null) {
+  const targetPath = accountPath || getSelectedAccountPath();
+  if (!targetPath) {
     await showFriendlyError('请选择账号', '请先选择要导出的微信账号。');
     return;
   }
 
+  const rootDir = wxDirInput.value.trim();
+  if (!rootDir) {
+    const parentDir = getParentDir(targetPath);
+    wxDirInput.value = parentDir;
+    saveSettings();
+    await validateWxDir(parentDir, targetPath);
+  } else if (targetPath !== getSelectedAccountPath()) {
+    await selectAccount(targetPath);
+  }
+
+  const cacheResult = await window.exporter.loadConversationCache({ accountPath: targetPath });
+  if (!cacheResult.ok || !cacheResult.cache?.conversations?.length) {
+    await showFriendlyError('缓存不可用', '未找到该账号的上次扫描结果，请重新扫描。');
+    void refreshConversationCacheHint();
+    return;
+  }
+
+  currentConversationCache = cacheResult.cache;
   applyConversationScanResult(
     {
-      conversations: currentConversationCache.conversations,
-      conversationCount: currentConversationCache.conversationCount,
-      totalMessages: currentConversationCache.totalMessages,
+      conversations: cacheResult.cache.conversations,
+      conversationCount: cacheResult.cache.conversationCount,
+      totalMessages: cacheResult.cache.totalMessages,
     },
     { fromCache: true }
   );
 }
 
-function showScanToast(title, message) {
+function showScanToast(title, message, note = null) {
   scanToast.classList.remove('hidden');
   scanToastTitle.textContent = title;
   scanToastMessage.textContent = message;
+  scanToastNote.textContent = note || scanToastNote.textContent;
   scanToastNote.classList.remove('hidden');
 }
 
@@ -747,7 +905,7 @@ async function scanConversations({ forceRescan = false } = {}) {
     await showFriendlyError(
       '扫描失败',
       result.error,
-      '请确认微信已登录，并在微信中打开几个聊天窗口后重试。\n若仍失败，可展开「高级选项」勾选「登录时自动获取解密密钥」，并以管理员身份运行本程序。'
+      '请确认微信已登录，并在微信中打开几个聊天窗口后重试。\n若仍失败，请以管理员身份运行本程序，并在 Hook 就绪后再点击微信「登录」。'
     );
     return;
   }
@@ -876,19 +1034,10 @@ async function initApp() {
     if (settings.wxDir || settings.outputDir) {
       window.exporter.saveSettings(settings).catch(() => {});
     }
+  } else {
+    void refreshConversationCacheHint();
   }
 }
-
-document.getElementById('pickKeysPath').addEventListener('click', async () => {
-  const selected = await window.exporter.pickFile({
-    title: '选择密钥 JSON 文件',
-    defaultPath: keysPathInput.value || undefined,
-  });
-  if (selected) {
-    keysPathInput.value = selected;
-    saveSettings();
-  }
-});
 
 document.getElementById('pickWxDir').addEventListener('click', () => {
   pickDirectory('选择 xwechat_files 目录', wxDirInput);
@@ -923,7 +1072,6 @@ autoDetectBtn.addEventListener('click', async () => {
 });
 
 scanBtn.addEventListener('click', () => scanConversations());
-useCacheBtn.addEventListener('click', () => useCachedConversations());
 rescanBtn.addEventListener('click', () => scanConversations({ forceRescan: true }));
 
 disclaimerAccepted.addEventListener('change', () => {
@@ -935,6 +1083,7 @@ welcomeNextBtn.addEventListener('click', () => {
   if (!disclaimerAccepted.checked) return;
   saveSettings();
   setStep(2);
+  void refreshConversationCacheHint();
 });
 
 accountBackBtn.addEventListener('click', () => setStep(1));
@@ -987,16 +1136,14 @@ document.querySelectorAll('input[name="format"]').forEach((input) => {
   input.addEventListener('change', saveSettings);
 });
 
-document.getElementById('loginCapture').addEventListener('change', saveSettings);
-document.getElementById('forceDecrypt').addEventListener('change', saveSettings);
-selfWxidInput.addEventListener('change', saveSettings);
-
 window.exporter.onProgress((event) => {
   if (event.phase === 'scan' || event.phase === 'init' || event.phase === 'decrypt' || event.phase === 'keys') {
     if (scanRunning) {
-      const title =
-        event.phase === 'decrypt' || event.phase === 'keys' ? '正在解密' : '正在扫描';
-      showScanToast(title, friendlyScanMessage(event));
+      showScanToast(
+        friendlyScanTitle(event),
+        friendlyScanMessage(event),
+        friendlyScanNote(event)
+      );
     }
     if (event.phase !== 'scan') {
       appendLog(event.message);

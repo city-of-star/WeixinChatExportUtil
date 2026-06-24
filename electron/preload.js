@@ -11,6 +11,7 @@ contextBridge.exposeInMainWorld('exporter', {
   scanConversations: (options) => ipcRenderer.invoke('scan-conversations', options),
   cancelScan: () => ipcRenderer.invoke('cancel-scan'),
   loadConversationCache: (payload) => ipcRenderer.invoke('load-conversation-cache', payload),
+  listConversationCaches: () => ipcRenderer.invoke('list-conversation-caches'),
   clearConversationCache: (payload) => ipcRenderer.invoke('clear-conversation-cache', payload),
   loadSettings: () => ipcRenderer.invoke('load-settings'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),

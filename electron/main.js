@@ -8,6 +8,7 @@ const {
   getConversationCache,
   saveConversationCache,
   clearConversationCache,
+  listConversationCaches,
 } = require('../lib/conversationCache');
 
 let mainWindow = null;
@@ -287,6 +288,15 @@ ipcMain.handle('clear-conversation-cache', async (_event, { accountPath }) => {
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('list-conversation-caches', async () => {
+  try {
+    const caches = listConversationCaches(getConversationCachePath());
+    return { ok: true, caches };
+  } catch (err) {
+    return { ok: false, error: err.message, caches: [] };
   }
 });
 
