@@ -11,9 +11,9 @@
     "build:hook": "powershell -ExecutionPolicy Bypass -File scripts/build-wexin-hook.ps1",
     "generate-icon": "node scripts/generate-icon.mjs",
     "pack": "electron-builder --dir",
-    "predist": "node scripts/generate-icon.mjs",
-    "predist:portable": "node scripts/generate-icon.mjs",
-    "predist:installer": "node scripts/generate-icon.mjs",
+    "predist": "node scripts/generate-icon.mjs && node scripts/ensure-hook-dll.js",
+    "predist:portable": "node scripts/generate-icon.mjs && node scripts/ensure-hook-dll.js",
+    "predist:installer": "node scripts/generate-icon.mjs && node scripts/ensure-hook-dll.js",
     "dist": "electron-builder --win portable",
     "dist:portable": "electron-builder --win portable",
     "dist:installer": "electron-builder --win nsis"
