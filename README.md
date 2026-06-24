@@ -134,7 +134,3 @@ wetrace/
 - [sql.js](https://github.com/sql-js/sql.js) — SQLite WASM 实现
 - [koffi](https://github.com/Koromix/koffi) — Node.js FFI 库
 - [Electron](https://www.electronjs.org/) — 跨平台桌面应用框架
-
----
-
-**Made with ❤️ and Cursor**
