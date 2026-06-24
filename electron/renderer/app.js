@@ -28,6 +28,15 @@ const scanBtn = document.getElementById('scanBtn');
 const step1Panel = document.getElementById('step1Panel');
 const step2Panel = document.getElementById('step2Panel');
 const step3Panel = document.getElementById('step3Panel');
+const step4Panel = document.getElementById('step4Panel');
+const step5Panel = document.getElementById('step5Panel');
+const disclaimerAccepted = document.getElementById('disclaimerAccepted');
+const welcomeNextBtn = document.getElementById('welcomeNextBtn');
+const accountBackBtn = document.getElementById('accountBackBtn');
+const exportBackBtn = document.getElementById('exportBackBtn');
+const toExportBtn = document.getElementById('toExportBtn');
+const openIndexBtn = document.getElementById('openIndexBtn');
+const outputGuide = document.getElementById('outputGuide');
 const convList = document.getElementById('convList');
 const convSummary = document.getElementById('convSummary');
 const convSearch = document.getElementById('convSearch');
@@ -46,6 +55,7 @@ const appVersion = document.getElementById('appVersion');
 const stepEls = [...document.querySelectorAll('.step')];
 
 let lastOutputDir = '';
+let lastHtmlIndexPath = '';
 let scannedAccounts = [];
 let conversationItems = [];
 let resolvedAccountPath = null;
@@ -111,6 +121,7 @@ function saveSettings() {
     forceDecrypt: document.getElementById('forceDecrypt').checked,
     formats: getSelectedFormats(),
     accountPath: selectedAccountPath,
+    disclaimerAccepted: disclaimerAccepted.checked,
   };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
   window.exporter.saveSettings(settings).catch(() => {});
@@ -135,6 +146,10 @@ function applySettingsToForm(settings) {
   if (settings.accountPath) {
     selectedAccountPath = settings.accountPath;
   }
+  if (typeof settings.disclaimerAccepted === 'boolean') {
+    disclaimerAccepted.checked = settings.disclaimerAccepted;
+    welcomeNextBtn.disabled = !settings.disclaimerAccepted;
+  }
 }
 
 function getSelectedFormats() {
@@ -145,6 +160,8 @@ function setStep(step) {
   step1Panel.classList.toggle('hidden', step !== 1);
   step2Panel.classList.toggle('hidden', step !== 2);
   step3Panel.classList.toggle('hidden', step !== 3);
+  step4Panel.classList.toggle('hidden', step !== 4);
+  step5Panel.classList.toggle('hidden', step !== 5);
 
   stepEls.forEach((el) => {
     const n = Number(el.dataset.step);
@@ -492,7 +509,8 @@ function updateConvSummary() {
     .reduce((sum, item) => sum + item.messageCount, 0);
 
   convSummary.textContent = `已选 ${selected.length} / ${conversationItems.length} 个会话，约 ${formatCount(selectedMessages)} 条消息`;
-  startBtn.disabled = selected.length === 0 || exportRunning;
+  toExportBtn.disabled = selected.length === 0;
+  startBtn.disabled = exportRunning;
 }
 
 function setConvSelection(checked) {
@@ -541,6 +559,7 @@ function formatCacheTime(iso) {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return '';
   return date.toLocaleString('zh-CN', {
+    year: 'numeric',
     month: 'numeric',
     day: 'numeric',
     hour: '2-digit',
@@ -619,12 +638,38 @@ async function refreshConversationCacheHint() {
 
 function applyConversationScanResult(result, { fromCache = false } = {}) {
   renderConversationList(result.conversations || []);
-  setStep(2);
+  setStep(3);
   if (fromCache) {
     appendLog(`已加载缓存：${result.conversationCount} 个会话，${formatCount(result.totalMessages)} 条消息`);
   } else {
     appendLog(`扫描完成：${result.conversationCount} 个会话，${formatCount(result.totalMessages)} 条消息`);
   }
+}
+
+function renderOutputGuide(formats) {
+  const items = [];
+  if (formats.includes('html')) {
+    items.push('<strong>index.html</strong> — 用浏览器打开，浏览所有会话');
+    items.push('<strong>chats/*.html</strong> — 每个会话的网页版聊天记录');
+  }
+  if (formats.includes('json')) {
+    items.push('<strong>conversations.json</strong> — 会话索引');
+    items.push('<strong>contacts.json</strong> — 联系人昵称');
+    items.push('<strong>chats/*.json</strong> — 每个会话的完整数据');
+  }
+  if (formats.includes('txt')) {
+    items.push('<strong>chats/*.txt</strong> — 纯文本格式，方便阅读');
+  }
+  if (formats.includes('csv')) {
+    items.push('<strong>messages.csv</strong> — 全部消息汇总，可用 Excel 打开');
+  }
+
+  if (!items.length) {
+    outputGuide.innerHTML = '';
+    return;
+  }
+
+  outputGuide.innerHTML = `<strong>文件说明</strong><ul>${items.map((item) => `<li>${item}</li>`).join('')}</ul>`;
 }
 
 async function useCachedConversations() {
@@ -662,16 +707,9 @@ function hideScanToast() {
 
 async function scanConversations({ forceRescan = false } = {}) {
   const rootDir = wxDirInput.value.trim();
-  const outputDir = outputDirInput.value.trim();
-  const formats = getSelectedFormats();
 
-  if (!rootDir || !outputDir) {
-    await showFriendlyError('请先完成设置', '请选择微信数据目录和导出保存位置。');
-    return;
-  }
-
-  if (formats.length === 0) {
-    await showFriendlyError('请选择导出格式', '至少勾选一种导出格式（JSON / HTML / TXT / CSV）。');
+  if (!rootDir) {
+    await showFriendlyError('请选择目录', '请选择微信数据目录。');
     return;
   }
 
@@ -730,6 +768,17 @@ async function scanConversations({ forceRescan = false } = {}) {
 
 async function startExport() {
   const options = getExportOptions();
+
+  if (!options.outputDir) {
+    await showFriendlyError('请选择保存位置', '请选择导出文件的保存目录。');
+    return;
+  }
+
+  if (!options.formats.length) {
+    await showFriendlyError('请选择导出格式', '至少勾选一种导出格式（JSON / HTML / TXT / CSV）。');
+    return;
+  }
+
   if (!options.selectedUsernames.length) {
     await showFriendlyError('未选择会话', '请至少选择一个要导出的会话。');
     return;
@@ -761,10 +810,17 @@ async function startExport() {
 
   if (result.ok) {
     lastOutputDir = result.result.outputDir;
+    lastHtmlIndexPath = result.result.htmlIndexPath || '';
     openOutputBtn.disabled = false;
+    if (lastHtmlIndexPath) {
+      openIndexBtn.classList.remove('hidden');
+    } else {
+      openIndexBtn.classList.add('hidden');
+    }
     setProgress(100, '导出完成');
     successSummary.textContent = `共导出 ${result.result.conversationCount} 个会话，${formatCount(result.result.totalMessages)} 条消息。\n文件已保存到：${result.result.outputDir}`;
-    setStep(3);
+    renderOutputGuide(options.formats);
+    setStep(5);
   } else if (result.cancelled) {
     setProgress(0, '已取消');
     appendLog('导出已取消');
@@ -812,7 +868,7 @@ async function initApp() {
   const settings = await loadSettings();
   applySettingsToForm(settings);
 
-  setStep(1);
+  setStep(settings.disclaimerAccepted ? 2 : 1);
   setProgress(0, '等待开始');
 
   if (settings.wxDir) {
@@ -869,6 +925,21 @@ autoDetectBtn.addEventListener('click', async () => {
 scanBtn.addEventListener('click', () => scanConversations());
 useCacheBtn.addEventListener('click', () => useCachedConversations());
 rescanBtn.addEventListener('click', () => scanConversations({ forceRescan: true }));
+
+disclaimerAccepted.addEventListener('change', () => {
+  welcomeNextBtn.disabled = !disclaimerAccepted.checked;
+  saveSettings();
+});
+
+welcomeNextBtn.addEventListener('click', () => {
+  if (!disclaimerAccepted.checked) return;
+  saveSettings();
+  setStep(2);
+});
+
+accountBackBtn.addEventListener('click', () => setStep(1));
+exportBackBtn.addEventListener('click', () => setStep(3));
+
 cancelScanBtn.addEventListener('click', async () => {
   userCancelledScan = true;
   await window.exporter.cancelScan();
@@ -877,7 +948,14 @@ cancelScanBtn.addEventListener('click', async () => {
   scanBtn.textContent = currentConversationCache ? '重新扫描' : '扫描会话';
   hideScanToast();
 });
-backBtn.addEventListener('click', () => setStep(1));
+backBtn.addEventListener('click', () => setStep(2));
+toExportBtn.addEventListener('click', async () => {
+  if (!getSelectedUsernames().length) {
+    await showFriendlyError('未选择会话', '请至少选择一个要导出的会话。');
+    return;
+  }
+  setStep(4);
+});
 startBtn.addEventListener('click', startExport);
 cancelBtn.addEventListener('click', async () => {
   await window.exporter.cancelExport();
@@ -892,10 +970,17 @@ openOutputBtn.addEventListener('click', () => {
   }
 });
 
+openIndexBtn.addEventListener('click', () => {
+  if (lastHtmlIndexPath) {
+    window.exporter.openPath(lastHtmlIndexPath);
+  }
+});
+
 restartBtn.addEventListener('click', () => {
-  setStep(1);
+  setStep(2);
   setProgress(0, '等待开始');
   logEl.textContent = '';
+  outputGuide.innerHTML = '';
 });
 
 document.querySelectorAll('input[name="format"]').forEach((input) => {

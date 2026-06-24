@@ -22,17 +22,87 @@
       </header>
 
       <nav class="steps" aria-label="导出步骤">
-        <div class="step active" data-step="1"><span>1</span> 选择目录</div>
-        <div class="step" data-step="2"><span>2</span> 选择会话</div>
-        <div class="step" data-step="3"><span>3</span> 导出完成</div>
+        <div class="step active" data-step="1"><span>1</span> 开始</div>
+        <div class="step" data-step="2"><span>2</span> 选择账号</div>
+        <div class="step" data-step="3"><span>3</span> 选择会话</div>
+        <div class="step" data-step="4"><span>4</span> 导出设置</div>
+        <div class="step" data-step="5"><span>5</span> 完成</div>
       </nav>
 
-      <!-- Step 1 -->
+      <!-- Step 1: Welcome -->
       <section id="step1Panel" class="panel">
+        <div class="card welcome-card">
+          <h2>欢迎使用微迹</h2>
+          <p class="welcome-lead">在本地电脑导出微信 PC 版聊天记录，数据不会离开你的设备。</p>
+
+          <div class="info-block privacy-block">
+            <h3>隐私说明</h3>
+            <ul class="info-list">
+              <li>本工具<strong>完全在本地运行</strong>，不会上传、同步或分享你的聊天记录</li>
+              <li>所有读写操作仅针对你电脑上的微信数据目录和导出文件夹</li>
+              <li>我们不会收集任何个人数据或聊天内容</li>
+            </ul>
+          </div>
+
+          <div class="info-block">
+            <h3>使用流程</h3>
+            <ol class="guide-steps">
+              <li><strong>选择账号</strong> — 定位微信数据目录，选择要导出的账号</li>
+              <li><strong>扫描会话</strong> — 首次可能需要几分钟；若需解密，工具会<strong>暂时关闭微信并自动重新打开</strong></li>
+              <li><strong>登录微信</strong> — 微信弹出后，请在窗口中点击「登录」（通常无需重新扫码）</li>
+              <li><strong>选择会话并导出</strong> — 勾选要导出的聊天，选择保存位置和格式</li>
+            </ol>
+          </div>
+
+          <div class="info-block">
+            <h3>导出后你会得到</h3>
+            <div class="output-preview">
+              <div class="output-tree">
+                <code>导出文件夹/</code>
+                <code>├── index.html</code>
+                <span class="output-desc">— 用浏览器打开，浏览所有会话（推荐）</span>
+                <code>├── conversations.json</code>
+                <span class="output-desc">— 会话索引与元数据</span>
+                <code>├── contacts.json</code>
+                <span class="output-desc">— 联系人昵称对照表</span>
+                <code>├── messages.csv</code>
+                <span class="output-desc">— 全部消息汇总（勾选 CSV 时）</span>
+                <code>└── chats/</code>
+                <span class="output-desc">— 每个会话单独的 HTML / JSON / TXT 文件</span>
+              </div>
+            </div>
+          </div>
+
+          <details class="disclaimer-details">
+            <summary>免责声明</summary>
+            <div class="disclaimer-body">
+              <p>本工具为第三方开源工具，与腾讯微信无任何关联。使用前请确认：</p>
+              <ul>
+                <li>你导出的聊天记录仅供个人备份与查阅，请遵守相关法律法规</li>
+                <li>请勿将他人隐私内容用于非法用途或未经授权的传播</li>
+                <li>解密过程需要读取微信本地数据库，请确保你有权访问该账号数据</li>
+                <li>因使用本工具产生的任何后果，由使用者自行承担</li>
+              </ul>
+            </div>
+          </details>
+
+          <label class="field checkbox-field disclaimer-check">
+            <input id="disclaimerAccepted" type="checkbox" />
+            <span>我已阅读并理解上述说明，同意在本地使用本工具</span>
+          </label>
+
+          <div class="actions">
+            <button id="welcomeNextBtn" class="btn primary" type="button" disabled>开始导出</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Step 2: Account -->
+      <section id="step2Panel" class="panel hidden">
         <div class="card">
           <div class="card-head">
-            <h2>快速开始</h2>
-            <button id="autoDetectBtn" class="btn ghost" type="button">自动检测微信目录</button>
+            <h2>选择微信账号</h2>
+            <button id="autoDetectBtn" class="btn ghost" type="button">自动检测</button>
           </div>
 
           <div id="detectResults" class="detect-results hidden"></div>
@@ -52,19 +122,6 @@
             <small id="accountHint" class="hint"></small>
           </div>
 
-          <div id="scanToast" class="scan-toast hidden" aria-live="polite">
-            <div class="scan-toast-inner">
-              <div class="spinner" aria-hidden="true"></div>
-              <div class="scan-toast-text">
-                <strong id="scanToastTitle">正在扫描</strong>
-                <span id="scanToastMessage">请稍候…</span>
-                <span id="scanToastElapsed" class="scan-toast-elapsed"></span>
-                <span id="scanToastNote" class="scan-toast-note">首次扫描可能需要几分钟，程序仍在运行，请耐心等待</span>
-              </div>
-              <button id="cancelScanBtn" class="btn secondary" type="button">取消</button>
-            </div>
-          </div>
-
           <div id="readinessPanel" class="readiness hidden">
             <div class="readiness-head">
               <span id="readinessBadge" class="readiness-badge">检测中</span>
@@ -72,6 +129,49 @@
             </div>
             <ul id="readinessSuggestions" class="readiness-list"></ul>
           </div>
+
+          <div id="cacheHint" class="cache-hint hidden">
+            <span id="cacheHintText"></span>
+            <button id="useCacheBtn" class="btn secondary" type="button">使用上次结果</button>
+          </div>
+
+          <div class="actions">
+            <button id="accountBackBtn" class="btn secondary" type="button">上一步</button>
+            <button id="scanBtn" class="btn primary" type="button">扫描会话</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Step 3: Conversations -->
+      <section id="step3Panel" class="panel hidden">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>选择要导出的会话</h2>
+              <p id="convSummary" class="subhead">—</p>
+            </div>
+            <div class="conv-tools">
+              <input id="convSearch" type="search" placeholder="搜索会话名称…" />
+              <button id="rescanBtn" class="btn ghost" type="button">刷新会话</button>
+              <button id="selectAllBtn" class="btn ghost" type="button">全选</button>
+              <button id="selectNoneBtn" class="btn ghost" type="button">全不选</button>
+            </div>
+          </div>
+
+          <div id="convList" class="conv-list"></div>
+
+          <div class="actions">
+            <button id="backBtn" class="btn secondary" type="button">上一步</button>
+            <button id="toExportBtn" class="btn primary" type="button">下一步</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Step 4: Export settings -->
+      <section id="step4Panel" class="panel hidden">
+        <div class="card">
+          <h2>导出设置</h2>
+          <p class="subhead">选择保存位置和格式，然后点击开始导出。</p>
 
           <label class="field">
             <span class="label">保存到</span>
@@ -89,7 +189,7 @@
               <label class="format-chip"><input type="checkbox" name="format" value="txt" /> TXT</label>
               <label class="format-chip"><input type="checkbox" name="format" value="csv" /> CSV</label>
             </div>
-            <small class="hint">HTML 可直接用浏览器查看；CSV 适合 Excel 分析</small>
+            <small class="hint">建议勾选 HTML，导出后双击 <code>index.html</code> 即可浏览聊天记录</small>
           </div>
 
           <details class="advanced">
@@ -117,37 +217,8 @@
             </div>
           </details>
 
-          <div id="cacheHint" class="cache-hint hidden">
-            <span id="cacheHintText"></span>
-            <button id="useCacheBtn" class="btn secondary" type="button">使用上次结果</button>
-          </div>
-
           <div class="actions">
-            <button id="scanBtn" class="btn primary" type="button">扫描会话</button>
-          </div>
-        </div>
-      </section>
-
-      <!-- Step 2 -->
-      <section id="step2Panel" class="panel hidden">
-        <div class="card">
-          <div class="card-head">
-            <div>
-              <h2>选择要导出的会话</h2>
-              <p id="convSummary" class="subhead">—</p>
-            </div>
-            <div class="conv-tools">
-              <input id="convSearch" type="search" placeholder="搜索会话名称…" />
-              <button id="rescanBtn" class="btn ghost" type="button">刷新会话</button>
-              <button id="selectAllBtn" class="btn ghost" type="button">全选</button>
-              <button id="selectNoneBtn" class="btn ghost" type="button">全不选</button>
-            </div>
-          </div>
-
-          <div id="convList" class="conv-list"></div>
-
-          <div class="actions">
-            <button id="backBtn" class="btn secondary" type="button">上一步</button>
+            <button id="exportBackBtn" class="btn secondary" type="button">上一步</button>
             <button id="startBtn" class="btn primary" type="button">开始导出</button>
             <button id="cancelBtn" class="btn danger hidden" type="button">取消导出</button>
           </div>
@@ -165,18 +236,33 @@
         </div>
       </section>
 
-      <!-- Step 3 -->
-      <section id="step3Panel" class="panel hidden">
+      <!-- Step 5: Done -->
+      <section id="step5Panel" class="panel hidden">
         <div class="card success-card">
           <div class="success-icon">✓</div>
           <h2>导出完成</h2>
           <p id="successSummary" class="success-summary"></p>
+          <div id="outputGuide" class="output-guide"></div>
           <div class="actions center">
             <button id="openOutputBtn" class="btn primary" type="button">打开导出文件夹</button>
+            <button id="openIndexBtn" class="btn secondary hidden" type="button">打开 index.html</button>
             <button id="restartBtn" class="btn secondary" type="button">再导一次</button>
           </div>
         </div>
       </section>
+
+      <div id="scanToast" class="scan-toast hidden" aria-live="polite">
+        <div class="scan-toast-inner">
+          <div class="spinner" aria-hidden="true"></div>
+          <div class="scan-toast-text">
+            <strong id="scanToastTitle">正在扫描</strong>
+            <span id="scanToastMessage">请稍候…</span>
+            <span id="scanToastElapsed" class="scan-toast-elapsed"></span>
+            <span id="scanToastNote" class="scan-toast-note">首次扫描可能需要几分钟。若弹出微信，请点击「登录」</span>
+          </div>
+          <button id="cancelScanBtn" class="btn secondary" type="button">取消</button>
+        </div>
+      </div>
     </div>
 
     <script src="app.js"></script>
