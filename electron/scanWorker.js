@@ -29,7 +29,7 @@ async function scanConversations(options) {
   } catch (firstErr) {
     if (cancelled) throw new Error('扫描已取消');
 
-    postProgress({ phase: 'scan', message: '未找到已解密数据，正在解密（可能需要几分钟）…' });
+    postProgress({ phase: 'scan', message: '首次扫描需要解密，可能需要几分钟…' });
     const { ensureDecrypted } = require('../lib/decryptCore');
 
     await ensureDecrypted({

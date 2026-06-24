@@ -9,7 +9,11 @@
     "export": "node export.js",
     "start": "electron .",
     "build:hook": "powershell -ExecutionPolicy Bypass -File scripts/build-wexin-hook.ps1",
+    "generate-icon": "node scripts/generate-icon.mjs",
     "pack": "electron-builder --dir",
+    "predist": "node scripts/generate-icon.mjs",
+    "predist:portable": "node scripts/generate-icon.mjs",
+    "predist:installer": "node scripts/generate-icon.mjs",
     "dist": "electron-builder --win portable",
     "dist:portable": "electron-builder --win portable",
     "dist:installer": "electron-builder --win nsis"
@@ -21,12 +25,14 @@
   },
   "devDependencies": {
     "electron": "^35.7.5",
-    "electron-builder": "^25.1.8"
+    "electron-builder": "^25.1.8",
+    "png-to-ico": "^3.0.1",
+    "sharp": "^0.35.2"
   },
   "build": {
     "appId": "com.wetrace.exporter",
     "productName": "微迹 Wetrace",
-    "icon": "build/logo.svg",
+    "icon": "build/icon.ico",
     "directories": {
       "output": "dist"
     },
@@ -35,6 +41,8 @@
       "lib/**/*",
       "assets/**/*",
       "build/logo.svg",
+      "build/icon.ico",
+      "build/icon.png",
       "export.js",
       "package.json",
       "node_modules/**/*"

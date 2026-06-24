@@ -10,6 +10,8 @@ contextBridge.exposeInMainWorld('exporter', {
   checkWeChatStatus: (payload) => ipcRenderer.invoke('check-wechat-status', payload),
   scanConversations: (options) => ipcRenderer.invoke('scan-conversations', options),
   cancelScan: () => ipcRenderer.invoke('cancel-scan'),
+  loadConversationCache: (payload) => ipcRenderer.invoke('load-conversation-cache', payload),
+  clearConversationCache: (payload) => ipcRenderer.invoke('clear-conversation-cache', payload),
   loadSettings: () => ipcRenderer.invoke('load-settings'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
   startExport: (options) => ipcRenderer.invoke('start-export', options),

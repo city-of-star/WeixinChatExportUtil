@@ -1,13 +1,20 @@
-const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, shell, nativeImage } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { Worker } = require('worker_threads');
 const { resolveWxDir, getWxDirStatus } = require('../lib/exportCore');
 const { detectWeChatDataPaths } = require('../lib/wxPathDetect');
+const {
+  getConversationCache,
+  saveConversationCache,
+  clearConversationCache,
+} = require('../lib/conversationCache');
 
 let mainWindow = null;
 let exportRunning = false;
 let scanRunning = false;
+let scanCancelRequested = false;
+let exportCancelRequested = false;
 let currentWorker = null;
 let scanWorker = null;
 let profileWorker = null;
@@ -16,14 +23,32 @@ function getSettingsPath() {
   return path.join(app.getPath('userData'), 'wetrace-settings.json');
 }
 
+function getConversationCachePath() {
+  return path.join(app.getPath('userData'), 'conversation-cache.json');
+}
+
+function resolveAppIconPath() {
+  const candidates = ['icon.ico', 'icon.png', 'logo.svg'];
+  for (const name of candidates) {
+    const candidate = path.join(__dirname, '..', 'build', name);
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
 function createWindow() {
+  const iconPath = resolveAppIconPath();
+  const icon = iconPath ? nativeImage.createFromPath(iconPath) : undefined;
+
   mainWindow = new BrowserWindow({
     width: 920,
     height: 820,
     minWidth: 720,
     minHeight: 680,
     title: '微迹 Wetrace',
-    icon: path.join(__dirname, '..', 'build', 'logo.svg'),
+    icon: icon && !icon.isEmpty() ? icon : iconPath,
     autoHideMenuBar: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -48,6 +73,7 @@ function runScanWorker(options) {
       scanWorker = null;
     }
 
+    scanCancelRequested = false;
     let settled = false;
     const worker = new Worker(path.join(__dirname, 'scanWorker.js'), {
       workerData: { options },
@@ -77,7 +103,12 @@ function runScanWorker(options) {
     });
 
     worker.on('exit', (code) => {
-      if (!settled && code !== 0) {
+      if (settled) return;
+      if (scanCancelRequested) {
+        finish(resolve, { ok: false, cancelled: true, error: '扫描已取消' });
+        return;
+      }
+      if (code !== 0) {
         finish(reject, new Error(`扫描任务异常退出 (code ${code})`));
       }
     });
@@ -238,6 +269,27 @@ ipcMain.handle('check-wechat-status', async (_event, payload) => {
   }
 });
 
+ipcMain.handle('load-conversation-cache', async (_event, { accountPath }) => {
+  try {
+    const cache = getConversationCache(getConversationCachePath(), accountPath);
+    if (!cache) {
+      return { ok: true, cache: null };
+    }
+    return { ok: true, cache };
+  } catch (err) {
+    return { ok: false, error: err.message, cache: null };
+  }
+});
+
+ipcMain.handle('clear-conversation-cache', async (_event, { accountPath }) => {
+  try {
+    clearConversationCache(getConversationCachePath(), accountPath);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 ipcMain.handle('scan-conversations', async (_event, options) => {
   if (scanRunning) {
     return { ok: false, error: '扫描正在进行中' };
@@ -247,6 +299,13 @@ ipcMain.handle('scan-conversations', async (_event, options) => {
   try {
     const msg = await runScanWorker(options);
     if (msg.ok) {
+      const accountPath = options.accountPath || msg.wxDir;
+      saveConversationCache(getConversationCachePath(), accountPath, {
+        conversationCount: msg.conversationCount,
+        totalMessages: msg.totalMessages,
+        selfWxid: msg.selfWxid,
+        conversations: msg.conversations,
+      });
       return {
         ok: true,
         conversations: msg.conversations,
@@ -258,6 +317,9 @@ ipcMain.handle('scan-conversations', async (_event, options) => {
     }
     return { ok: false, error: msg.error, cancelled: Boolean(msg.cancelled) };
   } catch (err) {
+    if (scanCancelRequested) {
+      return { ok: false, cancelled: true, error: '扫描已取消' };
+    }
     return { ok: false, error: err.message };
   } finally {
     scanRunning = false;
@@ -266,19 +328,23 @@ ipcMain.handle('scan-conversations', async (_event, options) => {
 });
 
 ipcMain.handle('cancel-scan', async () => {
+  scanCancelRequested = true;
+  scanRunning = false;
   const worker = scanWorker;
   if (!worker) {
-    return { ok: false };
+    return { ok: true, cancelled: true };
   }
-  scanWorker = null;
-  scanRunning = false;
   worker.postMessage({ type: 'cancel' });
   await worker.terminate().catch(() => {});
-  return { ok: true };
+  if (scanWorker === worker) {
+    scanWorker = null;
+  }
+  return { ok: true, cancelled: true };
 });
 
 function runExportInWorker(options) {
   return new Promise((resolve, reject) => {
+    exportCancelRequested = false;
     let settled = false;
     const worker = new Worker(path.join(__dirname, 'exportWorker.js'), {
       workerData: {
@@ -317,7 +383,12 @@ function runExportInWorker(options) {
     });
 
     worker.on('exit', (code) => {
-      if (!settled && code !== 0) {
+      if (settled) return;
+      if (exportCancelRequested) {
+        finish(resolve, { ok: false, cancelled: true, error: '导出已取消' });
+        return;
+      }
+      if (code !== 0) {
         finish(reject, new Error(`导出任务异常退出 (code ${code})`));
       }
     });
@@ -344,9 +415,14 @@ ipcMain.handle('start-export', async (_event, options) => {
     if (msg.ok) {
       return { ok: true, result: msg.result };
     }
-    sendProgress({ phase: 'error', message: msg.error });
+    if (!msg.cancelled) {
+      sendProgress({ phase: 'error', message: msg.error });
+    }
     return { ok: false, error: msg.error, cancelled: Boolean(msg.cancelled) };
   } catch (err) {
+    if (exportCancelRequested) {
+      return { ok: false, cancelled: true, error: '导出已取消' };
+    }
     sendProgress({ phase: 'error', message: err.message });
     return { ok: false, error: err.message };
   } finally {
@@ -356,15 +432,18 @@ ipcMain.handle('start-export', async (_event, options) => {
 });
 
 ipcMain.handle('cancel-export', async () => {
+  exportCancelRequested = true;
+  exportRunning = false;
   const worker = currentWorker;
   if (!worker) {
-    return { ok: false };
+    return { ok: true, cancelled: true };
   }
-  currentWorker = null;
-  exportRunning = false;
   worker.postMessage({ type: 'cancel' });
   await worker.terminate().catch(() => {});
-  return { ok: true };
+  if (currentWorker === worker) {
+    currentWorker = null;
+  }
+  return { ok: true, cancelled: true };
 });
 
 ipcMain.handle('open-path', async (_event, targetPath) => {
@@ -381,7 +460,12 @@ ipcMain.handle('show-error-dialog', async (_event, { title, message, detail }) =
   });
 });
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.wetrace.exporter');
+  }
+  createWindow();
+});
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {

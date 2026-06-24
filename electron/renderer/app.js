@@ -8,6 +8,12 @@ const scanToast = document.getElementById('scanToast');
 const scanToastTitle = document.getElementById('scanToastTitle');
 const scanToastMessage = document.getElementById('scanToastMessage');
 const cancelScanBtn = document.getElementById('cancelScanBtn');
+const scanToastElapsed = document.getElementById('scanToastElapsed');
+const scanToastNote = document.getElementById('scanToastNote');
+const cacheHint = document.getElementById('cacheHint');
+const cacheHintText = document.getElementById('cacheHintText');
+const useCacheBtn = document.getElementById('useCacheBtn');
+const rescanBtn = document.getElementById('rescanBtn');
 const keysPathInput = document.getElementById('keysPath');
 const outputDirInput = document.getElementById('outputDir');
 const selfWxidInput = document.getElementById('selfWxid');
@@ -46,6 +52,10 @@ let resolvedAccountPath = null;
 let selectedAccountPath = null;
 let exportRunning = false;
 let scanRunning = false;
+let userCancelledScan = false;
+let scanElapsedTimer = null;
+let scanStartedAt = 0;
+let currentConversationCache = null;
 const accountProfileCache = new Map();
 let profileLoadToken = 0;
 
@@ -276,18 +286,16 @@ function updateAccountProfileHint(accounts) {
   const selected = accounts.find((item) => item.path === selectedAccountPath) || accounts[0];
   if (!selected) return;
 
-  const hasRealName = selected.displayName && selected.displayName !== selected.wxid;
-  const hasAvatar = Boolean(selected.avatar);
-  const noDecrypted = selected.mode === 'encrypted' || (selected.hasEncrypted && !selected.hasDecrypted);
+  const noDecrypted = selected.mode === 'encrypted' && !selected.hasDecrypted;
 
-  if (noDecrypted && !hasRealName && !hasAvatar) {
-    accountHint.textContent = '昵称/头像需解密数据库后显示；扫描会话时会自动解密';
+  if (noDecrypted) {
+    accountHint.textContent = '首次扫描会自动解密以显示昵称和头像';
     accountHint.className = 'hint';
-  } else if (selected.passphraseCachePath) {
-    accountHint.textContent = `密钥已缓存在账号目录下的 .wexin_passphrase`;
-    accountHint.className = 'hint ok';
+  } else if (accounts.length > 1 && !selectedAccountPath) {
+    accountHint.textContent = '请点击选择要导出的账号';
+    accountHint.className = 'hint';
   } else {
-    accountHint.textContent = accounts.length > 1 && !selectedAccountPath ? '请点击选择要导出的账号' : '';
+    accountHint.textContent = '';
     accountHint.className = 'hint';
   }
 }
@@ -314,6 +322,7 @@ async function selectAccount(accountPath) {
   } else {
     renderReadiness(null);
   }
+  void refreshConversationCacheHint();
 }
 
 function applySelectedAccount(account) {
@@ -331,8 +340,8 @@ function renderReadiness(readiness) {
 
   readinessPanel.classList.remove('hidden');
   const levelMap = {
-    ready: { text: '可导出', className: 'ready' },
-    fallback: { text: '可导出', className: 'fallback' },
+    ready: { text: '微信已登录', className: 'ready' },
+    fallback: { text: '微信已登录', className: 'fallback' },
     maybe: { text: '建议预热', className: 'maybe' },
     not_ready: { text: '微信未运行', className: 'not-ready' },
   };
@@ -347,6 +356,7 @@ function renderReadiness(readiness) {
     li.textContent = tip;
     readinessSuggestions.appendChild(li);
   }
+  readinessSuggestions.style.display = readinessSuggestions.children.length ? '' : 'none';
 }
 
 async function validateWxDir(dir, accountPath = null) {
@@ -356,6 +366,7 @@ async function validateWxDir(dir, accountPath = null) {
     renderAccountOptions([]);
     renderReadiness(null);
     resolvedAccountPath = null;
+    void refreshConversationCacheHint();
     return null;
   }
 
@@ -370,6 +381,7 @@ async function validateWxDir(dir, accountPath = null) {
     renderAccountOptions([]);
     renderReadiness(null);
     resolvedAccountPath = null;
+    void refreshConversationCacheHint();
     return null;
   }
 
@@ -381,6 +393,7 @@ async function validateWxDir(dir, accountPath = null) {
     wxDirHint.className = 'hint';
     renderReadiness(null);
     resolvedAccountPath = null;
+    void refreshConversationCacheHint();
     return result;
   }
 
@@ -391,6 +404,7 @@ async function validateWxDir(dir, accountPath = null) {
   wxDirHint.className = 'hint ok';
   applySelectedAccount(result.selectedAccount);
   renderReadiness(result.readiness);
+  void refreshConversationCacheHint();
   return result;
 }
 
@@ -515,17 +529,138 @@ function getExportOptions() {
   };
 }
 
+function formatElapsed(ms) {
+  const totalSec = Math.floor(ms / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return min > 0 ? `${min} 分 ${sec.toString().padStart(2, '0')} 秒` : `${sec} 秒`;
+}
+
+function formatCacheTime(iso) {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  return date.toLocaleString('zh-CN', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function friendlyScanMessage(event) {
+  const msg = event?.message || '';
+  if (event?.phase === 'decrypt' && event.current && event.total) {
+    return `正在解密数据（${event.current}/${event.total}）…`;
+  }
+  if (msg.includes('提取数据库密钥') || msg.includes('密钥')) {
+    return '正在获取解密密钥…';
+  }
+  if (msg.includes('解密数据库文件') || msg.startsWith('解密中')) {
+    return '正在解密聊天记录…';
+  }
+  if (msg.includes('解密完成')) {
+    return '解密完成，正在整理会话…';
+  }
+  if (msg.includes('跳过解密')) {
+    return '正在读取已有数据…';
+  }
+  if (msg.includes('会话列表') || msg.includes('统计会话')) {
+    return '正在整理会话列表…';
+  }
+  if (msg.includes('未找到已解密')) {
+    return '首次扫描需要解密，可能需要几分钟…';
+  }
+  return msg.replace(/db_storage[^\s]*/g, '数据').replace(/\.wexin_passphrase/g, '密钥') || '处理中…';
+}
+
+function startScanElapsedTimer() {
+  stopScanElapsedTimer();
+  scanStartedAt = Date.now();
+  scanToastElapsed.textContent = '已等待 0 秒';
+  scanElapsedTimer = setInterval(() => {
+    scanToastElapsed.textContent = `已等待 ${formatElapsed(Date.now() - scanStartedAt)}`;
+  }, 1000);
+}
+
+function stopScanElapsedTimer() {
+  if (scanElapsedTimer) {
+    clearInterval(scanElapsedTimer);
+    scanElapsedTimer = null;
+  }
+  scanToastElapsed.textContent = '';
+}
+
+async function refreshConversationCacheHint() {
+  const accountPath = getSelectedAccountPath();
+  if (!accountPath) {
+    currentConversationCache = null;
+    cacheHint.classList.add('hidden');
+    scanBtn.textContent = '扫描会话';
+    return;
+  }
+
+  const result = await window.exporter.loadConversationCache({ accountPath });
+  if (!result.ok || !result.cache?.conversations?.length) {
+    currentConversationCache = null;
+    cacheHint.classList.add('hidden');
+    scanBtn.textContent = '扫描会话';
+    return;
+  }
+
+  currentConversationCache = result.cache;
+  const scannedAt = formatCacheTime(result.cache.scannedAt);
+  const staleNote = result.cache.stale ? '（可能有新消息，建议重新扫描）' : '';
+  cacheHintText.textContent = `上次扫描：${result.cache.conversationCount} 个会话，约 ${formatCount(result.cache.totalMessages)} 条消息${scannedAt ? ` · ${scannedAt}` : ''}${staleNote}`;
+  cacheHint.classList.remove('hidden');
+  cacheHint.classList.toggle('stale', Boolean(result.cache.stale));
+  scanBtn.textContent = result.cache.stale ? '重新扫描' : '重新扫描';
+}
+
+function applyConversationScanResult(result, { fromCache = false } = {}) {
+  renderConversationList(result.conversations || []);
+  setStep(2);
+  if (fromCache) {
+    appendLog(`已加载缓存：${result.conversationCount} 个会话，${formatCount(result.totalMessages)} 条消息`);
+  } else {
+    appendLog(`扫描完成：${result.conversationCount} 个会话，${formatCount(result.totalMessages)} 条消息`);
+  }
+}
+
+async function useCachedConversations() {
+  if (!currentConversationCache?.conversations?.length) {
+    return;
+  }
+
+  const accountPath = getSelectedAccountPath();
+  if (!accountPath) {
+    await showFriendlyError('请选择账号', '请先选择要导出的微信账号。');
+    return;
+  }
+
+  applyConversationScanResult(
+    {
+      conversations: currentConversationCache.conversations,
+      conversationCount: currentConversationCache.conversationCount,
+      totalMessages: currentConversationCache.totalMessages,
+    },
+    { fromCache: true }
+  );
+}
+
 function showScanToast(title, message) {
   scanToast.classList.remove('hidden');
   scanToastTitle.textContent = title;
   scanToastMessage.textContent = message;
+  scanToastNote.classList.remove('hidden');
 }
 
 function hideScanToast() {
   scanToast.classList.add('hidden');
+  stopScanElapsedTimer();
 }
 
-async function scanConversations() {
+async function scanConversations({ forceRescan = false } = {}) {
   const rootDir = wxDirInput.value.trim();
   const outputDir = outputDirInput.value.trim();
   const formats = getSelectedFormats();
@@ -550,23 +685,27 @@ async function scanConversations() {
   resolvedAccountPath = accountPath;
   saveSettings();
 
+  userCancelledScan = false;
   scanRunning = true;
   scanBtn.disabled = true;
   scanBtn.textContent = '扫描中…';
-  showScanToast('正在扫描', '后台处理中，界面仍可操作…');
+  showScanToast('正在扫描', '正在准备，请稍候…');
+  startScanElapsedTimer();
 
   const result = await window.exporter.scanConversations(getExportOptions());
 
   scanRunning = false;
   scanBtn.disabled = false;
-  scanBtn.textContent = '扫描会话';
   hideScanToast();
+  void refreshConversationCacheHint();
 
-  if (result.cancelled) {
+  if (result.cancelled || userCancelledScan) {
+    scanBtn.textContent = currentConversationCache ? '重新扫描' : '扫描会话';
     return;
   }
 
   if (!result.ok) {
+    scanBtn.textContent = currentConversationCache ? '重新扫描' : '扫描会话';
     await showFriendlyError(
       '扫描失败',
       result.error,
@@ -575,9 +714,8 @@ async function scanConversations() {
     return;
   }
 
-  renderConversationList(result.conversations || []);
-  setStep(2);
-  appendLog(`扫描完成：${result.conversationCount} 个会话，${formatCount(result.totalMessages)} 条消息`);
+  applyConversationScanResult(result);
+  scanBtn.textContent = '重新扫描';
 
   if (rootDir && resolvedAccountPath) {
     const status = await window.exporter.validateWxDir({
@@ -728,12 +866,15 @@ autoDetectBtn.addEventListener('click', async () => {
   }
 });
 
-scanBtn.addEventListener('click', scanConversations);
+scanBtn.addEventListener('click', () => scanConversations());
+useCacheBtn.addEventListener('click', () => useCachedConversations());
+rescanBtn.addEventListener('click', () => scanConversations({ forceRescan: true }));
 cancelScanBtn.addEventListener('click', async () => {
+  userCancelledScan = true;
   await window.exporter.cancelScan();
   scanRunning = false;
   scanBtn.disabled = false;
-  scanBtn.textContent = '扫描会话';
+  scanBtn.textContent = currentConversationCache ? '重新扫描' : '扫描会话';
   hideScanToast();
 });
 backBtn.addEventListener('click', () => setStep(1));
@@ -766,20 +907,14 @@ document.getElementById('forceDecrypt').addEventListener('change', saveSettings)
 selfWxidInput.addEventListener('change', saveSettings);
 
 window.exporter.onProgress((event) => {
-  if (event.phase === 'scan') {
+  if (event.phase === 'scan' || event.phase === 'init' || event.phase === 'decrypt' || event.phase === 'keys') {
     if (scanRunning) {
-      showScanToast('正在扫描', event.message || '后台处理中…');
+      const title =
+        event.phase === 'decrypt' || event.phase === 'keys' ? '正在解密' : '正在扫描';
+      showScanToast(title, friendlyScanMessage(event));
     }
-  } else if (event.phase === 'init' || event.phase === 'decrypt' || event.phase === 'keys') {
-    if (scanRunning) {
-      showScanToast(event.phase === 'decrypt' ? '正在解密' : '正在扫描', event.message || '请稍候…');
-    }
-    appendLog(event.message);
-    if (event.phase === 'decrypt' && event.current && event.total) {
-      const percent = Math.round((event.current / event.total) * 25);
-      setProgress(percent, event.message);
-    } else if (event.phase === 'keys' || event.phase === 'decrypt') {
-      setProgress(8, event.message);
+    if (event.phase !== 'scan') {
+      appendLog(event.message);
     }
   } else if (event.phase === 'exporting') {
     const percent = event.totalCandidates

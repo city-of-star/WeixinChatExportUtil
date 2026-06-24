@@ -58,6 +58,8 @@
               <div class="scan-toast-text">
                 <strong id="scanToastTitle">正在扫描</strong>
                 <span id="scanToastMessage">请稍候…</span>
+                <span id="scanToastElapsed" class="scan-toast-elapsed"></span>
+                <span id="scanToastNote" class="scan-toast-note">首次扫描可能需要几分钟，程序仍在运行，请耐心等待</span>
               </div>
               <button id="cancelScanBtn" class="btn secondary" type="button">取消</button>
             </div>
@@ -115,6 +117,11 @@
             </div>
           </details>
 
+          <div id="cacheHint" class="cache-hint hidden">
+            <span id="cacheHintText"></span>
+            <button id="useCacheBtn" class="btn secondary" type="button">使用上次结果</button>
+          </div>
+
           <div class="actions">
             <button id="scanBtn" class="btn primary" type="button">扫描会话</button>
           </div>
@@ -131,6 +138,7 @@
             </div>
             <div class="conv-tools">
               <input id="convSearch" type="search" placeholder="搜索会话名称…" />
+              <button id="rescanBtn" class="btn ghost" type="button">刷新会话</button>
               <button id="selectAllBtn" class="btn ghost" type="button">全选</button>
               <button id="selectNoneBtn" class="btn ghost" type="button">全不选</button>
             </div>
