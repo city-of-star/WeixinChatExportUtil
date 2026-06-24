@@ -1,7 +1,7 @@
 {
-  "name": "wexinchat-exporter",
+  "name": "wetrace",
   "version": "1.0.0",
-  "description": "微信 PC 4.x 聊天记录 JSON 导出工具",
+  "description": "微迹 Wetrace - 微信 PC 聊天记录导出工具",
   "main": "electron/main.js",
   "author": "",
   "license": "MIT",
@@ -24,9 +24,9 @@
     "electron-builder": "^25.1.8"
   },
   "build": {
-    "appId": "com.wexinchat.exporter",
-    "productName": "微信聊天记录导出",
-    "icon": "build/icon.png",
+    "appId": "com.wetrace.exporter",
+    "productName": "微迹 Wetrace",
+    "icon": "build/logo.svg",
     "directories": {
       "output": "dist"
     },
@@ -34,7 +34,7 @@
       "electron/**/*",
       "lib/**/*",
       "assets/**/*",
-      "build/icon.png",
+      "build/logo.svg",
       "export.js",
       "package.json",
       "node_modules/**/*"
@@ -58,7 +58,7 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "shortcutName": "微信聊天记录导出"
+      "shortcutName": "微迹 Wetrace"
     }
   }
 }

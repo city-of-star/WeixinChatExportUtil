@@ -3,106 +3,171 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>微信聊天记录导出工具</title>
+    <title>微迹 Wetrace</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div class="app">
-      <header class="hero">
-        <div>
-          <h1>微信聊天记录导出工具</h1>
-          <p>一键解密并导出微信 PC 4.x 聊天记录为 JSON，无需安装 Node / Python</p>
+      <header class="topbar">
+        <div class="brand">
+          <img src="logo.svg" alt="" class="brand-logo" />
+          <div>
+            <h1>微迹 <span class="brand-en">Wetrace</span></h1>
+            <p class="tagline">珍藏每一段对话</p>
+          </div>
         </div>
-        <span class="badge">WeChat 4.x</span>
+        <div class="topbar-meta">
+          <span id="appVersion" class="version"></span>
+        </div>
       </header>
 
-      <section class="card">
-        <label class="field">
-          <span class="label">微信数据目录</span>
-          <div class="input-row">
-            <input id="wxDir" type="text" placeholder="选择 xwechat_files 目录" />
-            <button id="pickWxDir" class="btn secondary" type="button">浏览</button>
+      <nav class="steps" aria-label="导出步骤">
+        <div class="step active" data-step="1"><span>1</span> 选择目录</div>
+        <div class="step" data-step="2"><span>2</span> 选择会话</div>
+        <div class="step" data-step="3"><span>3</span> 导出完成</div>
+      </nav>
+
+      <!-- Step 1 -->
+      <section id="step1Panel" class="panel">
+        <div class="card">
+          <div class="card-head">
+            <h2>快速开始</h2>
+            <button id="autoDetectBtn" class="btn ghost" type="button">自动检测微信目录</button>
           </div>
-          <small id="wxDirHint" class="hint">
-            例如: D:\WeChat\xwechat_files（工具会自动扫描其中的账号）
-          </small>
-        </label>
 
-        <label id="accountField" class="field hidden">
-          <span class="label">选择微信账号</span>
-          <select id="accountSelect"></select>
-          <small id="accountHint" class="hint"></small>
-        </label>
+          <div id="detectResults" class="detect-results hidden"></div>
 
-        <div id="readinessPanel" class="readiness hidden">
-          <div class="readiness-head">
-            <span id="readinessBadge" class="readiness-badge">检测中</span>
-            <span id="readinessHint" class="readiness-hint"></span>
+          <label class="field">
+            <span class="label">微信数据目录</span>
+            <div class="input-row">
+              <input id="wxDir" type="text" placeholder="选择 xwechat_files 文件夹" />
+              <button id="pickWxDir" class="btn secondary" type="button">浏览</button>
+            </div>
+            <small id="wxDirHint" class="hint">通常位于 Documents 或 D:\WeChat\xwechat_files</small>
+          </label>
+
+          <div id="accountField" class="field hidden">
+            <span class="label">选择微信账号</span>
+            <div id="accountList" class="account-list"></div>
+            <small id="accountHint" class="hint"></small>
           </div>
-          <ul id="readinessSuggestions" class="readiness-list"></ul>
-          <div id="readinessProcesses" class="readiness-processes"></div>
-        </div>
 
-        <label class="field">
-          <span class="label">导出目录</span>
-          <div class="input-row">
-            <input id="outputDir" type="text" placeholder="选择 JSON 文件保存位置" />
-            <button id="pickOutputDir" class="btn secondary" type="button">浏览</button>
+          <div id="scanToast" class="scan-toast hidden" aria-live="polite">
+            <div class="scan-toast-inner">
+              <div class="spinner" aria-hidden="true"></div>
+              <div class="scan-toast-text">
+                <strong id="scanToastTitle">正在扫描</strong>
+                <span id="scanToastMessage">请稍候…</span>
+              </div>
+              <button id="cancelScanBtn" class="btn secondary" type="button">取消</button>
+            </div>
           </div>
-        </label>
 
-        <label class="field">
-          <span class="label">当前账号 wxid（可选）</span>
-          <input id="selfWxid" type="text" placeholder="留空则自动从文件夹名推断" />
-        </label>
-
-        <label class="field">
-          <span class="label">密钥文件（可选，4.1.10+ 推荐）</span>
-          <div class="input-row">
-            <input id="keysPath" type="text" placeholder="all_keys.json 路径，或留空自动 Hook" />
-            <button id="pickKeysPath" class="btn secondary" type="button">浏览</button>
+          <div id="readinessPanel" class="readiness hidden">
+            <div class="readiness-head">
+              <span id="readinessBadge" class="readiness-badge">检测中</span>
+              <span id="readinessHint" class="readiness-hint"></span>
+            </div>
+            <ul id="readinessSuggestions" class="readiness-list"></ul>
           </div>
-          <small class="hint">微信 4.1.10+ 使用内置 Hook（npm run build:hook）或导入 all_keys.json</small>
-        </label>
 
-        <label class="field checkbox-field">
-          <input id="loginCapture" type="checkbox" checked />
-          <span>登录时 Hook 捕获密钥（内置 wexin_hook.dll，需管理员运行）</span>
-        </label>
+          <label class="field">
+            <span class="label">保存到</span>
+            <div class="input-row">
+              <input id="outputDir" type="text" placeholder="选择导出文件保存位置" />
+              <button id="pickOutputDir" class="btn secondary" type="button">浏览</button>
+            </div>
+          </label>
 
-        <label class="field checkbox-field">
-          <input id="forceDecrypt" type="checkbox" />
-          <span>强制重新解密（即使已有 db_storage_decrypted）</span>
-        </label>
+          <div class="field">
+            <span class="label">导出格式</span>
+            <div class="format-grid">
+              <label class="format-chip"><input type="checkbox" name="format" value="json" checked /> JSON</label>
+              <label class="format-chip"><input type="checkbox" name="format" value="html" checked /> HTML</label>
+              <label class="format-chip"><input type="checkbox" name="format" value="txt" /> TXT</label>
+              <label class="format-chip"><input type="checkbox" name="format" value="csv" /> CSV</label>
+            </div>
+            <small class="hint">HTML 可直接用浏览器查看；CSV 适合 Excel 分析</small>
+          </div>
 
-        <div class="actions">
-          <button id="startBtn" class="btn primary" type="button">开始解密并导出</button>
-          <button id="openOutputBtn" class="btn secondary" type="button" disabled>打开导出目录</button>
+          <details class="advanced">
+            <summary>高级选项</summary>
+            <div class="advanced-body">
+              <label class="field">
+                <span class="label">当前账号 ID（一般留空）</span>
+                <input id="selfWxid" type="text" placeholder="留空则自动识别" />
+              </label>
+              <label class="field">
+                <span class="label">密钥文件（一般留空）</span>
+                <div class="input-row">
+                  <input id="keysPath" type="text" placeholder="all_keys.json，留空则自动获取" />
+                  <button id="pickKeysPath" class="btn secondary" type="button">浏览</button>
+                </div>
+              </label>
+              <label class="field checkbox-field">
+                <input id="loginCapture" type="checkbox" checked />
+                <span>登录时自动获取解密密钥（微信 4.1.10+ 建议开启，需管理员权限）</span>
+              </label>
+              <label class="field checkbox-field">
+                <input id="forceDecrypt" type="checkbox" />
+                <span>强制重新解密数据库</span>
+              </label>
+            </div>
+          </details>
+
+          <div class="actions">
+            <button id="scanBtn" class="btn primary" type="button">扫描会话</button>
+          </div>
         </div>
       </section>
 
-      <section class="card">
-        <div class="progress-head">
-          <span>导出进度</span>
-          <span id="progressText">等待开始</span>
+      <!-- Step 2 -->
+      <section id="step2Panel" class="panel hidden">
+        <div class="card">
+          <div class="card-head">
+            <div>
+              <h2>选择要导出的会话</h2>
+              <p id="convSummary" class="subhead">—</p>
+            </div>
+            <div class="conv-tools">
+              <input id="convSearch" type="search" placeholder="搜索会话名称…" />
+              <button id="selectAllBtn" class="btn ghost" type="button">全选</button>
+              <button id="selectNoneBtn" class="btn ghost" type="button">全不选</button>
+            </div>
+          </div>
+
+          <div id="convList" class="conv-list"></div>
+
+          <div class="actions">
+            <button id="backBtn" class="btn secondary" type="button">上一步</button>
+            <button id="startBtn" class="btn primary" type="button">开始导出</button>
+            <button id="cancelBtn" class="btn danger hidden" type="button">取消导出</button>
+          </div>
         </div>
-        <div class="progress-bar">
-          <div id="progressFill" class="progress-fill"></div>
+
+        <div class="card progress-card">
+          <div class="progress-head">
+            <span>导出进度</span>
+            <span id="progressText">等待开始</span>
+          </div>
+          <div class="progress-bar">
+            <div id="progressFill" class="progress-fill"></div>
+          </div>
+          <pre id="log" class="log"></pre>
         </div>
-        <pre id="log" class="log"></pre>
       </section>
 
-      <section class="card info">
-        <h2>使用说明</h2>
-        <ul>
-          <li>微信 4.1.10+ 需先构建内置 Hook 模块（<code>npm run build:hook</code>），并以<strong>管理员身份</strong>运行；也可导入 <code>all_keys.json</code>。</li>
-          <li>若解密失败，请勾选「登录时捕获密钥」：工具会关闭微信，在您重新登录时自动提取密钥（微信 4.1.10+ 必需）。</li>
-          <li>请<strong>先启动并登录</strong>微信 PC 版（Weixin.exe 需在运行中）。</li>
-          <li>选择 <code>xwechat_files</code> 目录即可，工具会自动扫描并列出其中的微信账号。</li>
-          <li>若目录下只有一个账号，会自动选中；多个账号时请在下拉框中选择。</li>
-          <li>导出结果包含 <code>conversations.json</code> 索引和 <code>chats/*.json</code> 各会话文件。</li>
-          <li>打包后的 exe 可直接发给他人使用，<strong>无需安装任何运行环境</strong>。</li>
-        </ul>
+      <!-- Step 3 -->
+      <section id="step3Panel" class="panel hidden">
+        <div class="card success-card">
+          <div class="success-icon">✓</div>
+          <h2>导出完成</h2>
+          <p id="successSummary" class="success-summary"></p>
+          <div class="actions center">
+            <button id="openOutputBtn" class="btn primary" type="button">打开导出文件夹</button>
+            <button id="restartBtn" class="btn secondary" type="button">再导一次</button>
+          </div>
+        </div>
       </section>
     </div>
 
