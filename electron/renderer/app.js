@@ -821,10 +821,13 @@ function friendlyScanMessage(event) {
     if (msg.includes('Hook 已就绪') || msg.includes('请点击「登录」') || msg.includes('点击「登录」')) {
       return 'Hook 已就绪，请在微信窗口点击「登录」（通常无需扫码）';
     }
+    if (msg.includes('正在准备 Hook 环境') || msg.includes('Hook 环境准备完成')) {
+      return sanitizeScanMessage(msg);
+    }
     if (msg.includes('请先不要点击') || msg.includes('不要点击登录') || msg.includes('等待提示后再点击')) {
       return '正在安装 Hook，请先不要点击「登录」…';
     }
-    if (msg.includes('等待密钥') || msg.includes('仍在捕获')) {
+    if (msg.includes('等待密钥') || msg.includes('仍在捕获') || msg.includes('等待捕获密钥')) {
       return sanitizeScanMessage(msg);
     }
     if (msg.includes('正在安装 Hook') || msg.includes('Hook 尚未就绪') || msg.includes('等待微信组件')) {
@@ -884,6 +887,9 @@ function friendlyScanNote(event) {
   if (phase === 'keys') {
     if (msg.includes('Hook 已就绪') || msg.includes('等待密钥') || msg.includes('仍在捕获') || msg.includes('点击「登录」')) {
       return '请在弹出的微信窗口点击「登录」。若长时间无响应，请右键本程序「以管理员身份运行」后重试。';
+    }
+    if (msg.includes('正在准备 Hook 环境') || msg.includes('Hook 环境准备完成')) {
+      return '正在加载解密模块并定位微信路径，此阶段不会关闭微信。准备完成后才会重启微信。';
     }
     if (
       msg.includes('请先不要点击') ||
