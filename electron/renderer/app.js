@@ -365,7 +365,7 @@ function renderAccountOptions(accounts, selectedPath = null) {
 
   updateAccountCardSelection();
   accountHint.textContent =
-    scannedAccounts.length > 1 && !selectedAccountPath ? '请点击选择要导出的账号' : '';
+    scannedAccounts.length > 1 && !selectedAccountPath ? '请选择要导出的账号' : '';
 }
 
 async function loadAccountProfiles(accounts) {
@@ -396,12 +396,21 @@ async function loadAccountProfiles(accounts) {
     cacheAccountProfiles(result.accounts);
     renderAccountOptions(result.accounts, selectedAccountPath);
     updateAccountProfileHint(result.accounts);
+    for (const account of result.accounts) {
+      if (isRealDisplayName(account.displayName, account.wxid)) {
+        window.exporter.patchConversationCacheLabel({
+          accountPath: account.path,
+          displayName: account.displayName,
+        }).catch(() => {});
+      }
+    }
+    void refreshConversationCacheHint();
   }
 }
 
 function updateAccountProfileHint(accounts) {
   if (accounts.length > 1 && !selectedAccountPath) {
-    accountHint.textContent = '请点击选择要导出的账号';
+    accountHint.textContent = '请选择要导出的账号';
     accountHint.className = 'hint';
   } else {
     accountHint.textContent = '';
@@ -432,7 +441,7 @@ async function selectAccount(accountPath) {
 }
 
 function renderReadiness(readiness) {
-  if (!readiness) {
+  if (!readiness || readiness.level === 'ready') {
     readinessPanel.classList.add('hidden');
     return;
   }
@@ -500,7 +509,7 @@ async function validateWxDir(dir, accountPath = null) {
   resolvedAccountPath = result.resolved;
   selectedAccountPath = result.resolved;
   updateAccountCardSelection();
-  wxDirHint.textContent = result.hint || '已识别微信账号';
+  wxDirHint.textContent = result.hint;
   wxDirHint.className = 'hint ok';
   renderReadiness(result.readiness);
   void refreshConversationCacheHint();
@@ -758,10 +767,12 @@ function getExportOptions() {
   const accountPath = resolvedAccountPath || getSelectedAccountPath();
   const account = scannedAccounts.find((item) => item.path === accountPath);
   const cachedProfile = accountPath ? accountProfileCache.get(accountPath) : null;
+  const rawName = cachedProfile?.displayName || account?.displayName || null;
+  const wxid = account?.wxid || null;
   return {
     wxDir: wxDirInput.value.trim(),
     accountPath,
-    displayName: cachedProfile?.displayName || account?.displayName || null,
+    displayName: isRealDisplayName(rawName, wxid) ? rawName : null,
     outputDir: outputDirInput.value.trim(),
     selfWxid: null,
     forceDecrypt: false,
@@ -927,6 +938,13 @@ function getParentDir(filePath) {
   return idx >= 0 ? normalized.slice(0, idx) : normalized;
 }
 
+function getWxidFromPath(accountPath, selfWxid = null) {
+  if (selfWxid) return selfWxid;
+  const folderName = accountPath.split(/[/\\]/).pop() || accountPath;
+  const match = folderName.match(/^(.+?)_c[a-f0-9]+$/i);
+  return match ? match[1] : folderName;
+}
+
 function getAccountLabel(accountPath, hints = null) {
   let selfWxid = null;
   let displayName = null;
@@ -938,17 +956,19 @@ function getAccountLabel(accountPath, hints = null) {
     displayName = hints.displayName || null;
   }
 
-  if (displayName) {
+  const wxid = getWxidFromPath(accountPath, selfWxid);
+
+  if (isRealDisplayName(displayName, wxid)) {
     return displayName;
   }
 
   const profile = accountProfileCache.get(accountPath);
-  if (profile?.displayName) {
+  if (isRealDisplayName(profile?.displayName, wxid)) {
     return profile.displayName;
   }
 
   const account = scannedAccounts.find((item) => item.path === accountPath);
-  if (account?.displayName) {
+  if (isRealDisplayName(account?.displayName, wxid)) {
     return account.displayName;
   }
 
@@ -959,26 +979,27 @@ function getAccountLabel(accountPath, hints = null) {
     return fromFolder;
   }
 
-  if (selfWxid) {
-    return selfWxid;
-  }
-
-  return fromFolder;
+  return wxid;
 }
 
 async function enrichCacheAccountProfiles(caches) {
   const missing = [];
 
   for (const cache of caches) {
-    if (cache.displayName) {
+    const wxid = getWxidFromPath(cache.accountPath, cache.selfWxid);
+    if (isRealDisplayName(cache.displayName, wxid)) {
       continue;
     }
     const profile = accountProfileCache.get(cache.accountPath);
-    if (profile?.displayName) {
+    if (isRealDisplayName(profile?.displayName, wxid)) {
       cache.displayName = profile.displayName;
+      window.exporter.patchConversationCacheLabel({
+        accountPath: cache.accountPath,
+        displayName: profile.displayName,
+      }).catch(() => {});
       continue;
     }
-    missing.push({ path: cache.accountPath, wxid: cache.selfWxid });
+    missing.push({ path: cache.accountPath, wxid });
   }
 
   if (!missing.length) {
@@ -994,7 +1015,7 @@ async function enrichCacheAccountProfiles(caches) {
     cacheAccountProfiles(result.accounts);
     for (const account of result.accounts) {
       const cache = caches.find((item) => item.accountPath === account.path);
-      if (!cache || !account.displayName) {
+      if (!cache || !isRealDisplayName(account.displayName, account.wxid)) {
         continue;
       }
       cache.displayName = account.displayName;
@@ -1043,12 +1064,28 @@ function renderConversationCacheList(caches, selectedPath) {
       item.classList.add('selected');
     }
 
+    const label = getAccountLabel(cache.accountPath, cache);
+    const profile = accountProfileCache.get(cache.accountPath);
+
+    if (profile?.avatar) {
+      const img = document.createElement('img');
+      img.className = 'account-avatar cache-item-avatar';
+      img.src = profile.avatar;
+      img.alt = '';
+      item.appendChild(img);
+    } else {
+      const placeholder = document.createElement('div');
+      placeholder.className = 'account-avatar placeholder cache-item-avatar';
+      placeholder.textContent = label.slice(0, 1).toUpperCase();
+      item.appendChild(placeholder);
+    }
+
     const info = document.createElement('div');
     info.className = 'cache-item-info';
 
     const title = document.createElement('div');
     title.className = 'cache-item-title';
-    title.textContent = getAccountLabel(cache.accountPath, cache);
+    title.textContent = label;
 
     const meta = document.createElement('div');
     meta.className = 'cache-item-meta';
@@ -1083,7 +1120,12 @@ function renderConversationCacheList(caches, selectedPath) {
 
 async function deleteConversationCache(accountPath) {
   let cache = conversationCacheEntries.find((item) => item.accountPath === accountPath);
-  if (cache && !cache.displayName && !accountProfileCache.get(accountPath)?.displayName) {
+  const wxid = getWxidFromPath(accountPath, cache?.selfWxid);
+  if (
+    cache &&
+    !isRealDisplayName(cache.displayName, wxid) &&
+    !isRealDisplayName(accountProfileCache.get(accountPath)?.displayName, wxid)
+  ) {
     await enrichCacheAccountProfiles([cache]);
     cache = conversationCacheEntries.find((item) => item.accountPath === accountPath) || cache;
   }
@@ -1249,7 +1291,9 @@ async function scanConversations() {
       accountPath: resolvedAccountPath,
     });
     if (status.ok && status.accounts?.length) {
-      void loadAccountProfiles(status.accounts);
+      await loadAccountProfiles(status.accounts);
+    } else {
+      void refreshConversationCacheHint();
     }
   }
 }

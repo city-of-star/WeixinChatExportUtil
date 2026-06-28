@@ -675,6 +675,12 @@ select:focus {
   box-shadow: 0 0 0 1px rgba(7, 193, 96, 0.12);
 }
 
+.cache-item-avatar {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+}
+
 .cache-item-info {
   min-width: 0;
   flex: 1;
