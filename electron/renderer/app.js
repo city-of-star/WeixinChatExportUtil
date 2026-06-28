@@ -18,7 +18,6 @@ const readinessPanel = document.getElementById('readinessPanel');
 const readinessBadge = document.getElementById('readinessBadge');
 const readinessHint = document.getElementById('readinessHint');
 const readinessSuggestions = document.getElementById('readinessSuggestions');
-const detectResults = document.getElementById('detectResults');
 const autoDetectBtn = document.getElementById('autoDetectBtn');
 const refreshAccountsBtn = document.getElementById('refreshAccountsBtn');
 const scanBtn = document.getElementById('scanBtn');
@@ -401,15 +400,7 @@ async function loadAccountProfiles(accounts) {
 }
 
 function updateAccountProfileHint(accounts) {
-  const selected = accounts.find((item) => item.path === selectedAccountPath) || accounts[0];
-  if (!selected) return;
-
-  const noDecrypted = selected.mode === 'encrypted' && !selected.hasDecrypted;
-
-  if (noDecrypted) {
-    accountHint.textContent = '首次扫描会自动解密以显示昵称和头像';
-    accountHint.className = 'hint';
-  } else if (accounts.length > 1 && !selectedAccountPath) {
+  if (accounts.length > 1 && !selectedAccountPath) {
     accountHint.textContent = '请点击选择要导出的账号';
     accountHint.className = 'hint';
   } else {
@@ -1334,32 +1325,6 @@ async function startExport() {
   }
 }
 
-function renderDetectResults(paths) {
-  detectResults.innerHTML = '';
-  if (!paths.length) {
-    detectResults.classList.add('hidden');
-    return;
-  }
-
-  detectResults.classList.remove('hidden');
-  for (const item of paths) {
-    const row = document.createElement('div');
-    row.className = 'detect-item';
-    row.innerHTML = `<div><strong>${item.label}</strong><br><code>${item.path}</code></div>`;
-    const btn = document.createElement('button');
-    btn.className = 'btn ghost';
-    btn.type = 'button';
-    btn.textContent = '使用';
-    btn.addEventListener('click', async () => {
-      wxDirInput.value = item.path;
-      saveSettings();
-      await validateWxDir(item.path);
-    });
-    row.appendChild(btn);
-    detectResults.appendChild(row);
-  }
-}
-
 async function initApp() {
   const info = await window.exporter.getAppInfo();
   appVersion.textContent = `v${info.version}`;
@@ -1409,11 +1374,17 @@ autoDetectBtn.addEventListener('click', async () => {
     return;
   }
 
-  renderDetectResults(result.paths || []);
-  if (!result.paths?.length) {
+  const paths = result.paths || [];
+  if (!paths.length) {
     wxDirHint.textContent = '未在常见位置找到微信数据，请手动浏览选择';
     wxDirHint.className = 'hint';
+    return;
   }
+
+  const detected = paths[0];
+  wxDirInput.value = detected.path;
+  saveSettings();
+  await validateWxDir(detected.path);
 });
 
 scanBtn.addEventListener('click', () => scanConversations());

@@ -117,8 +117,6 @@
                 <p>打开微信「设置 → 账号与存储 → 存储位置」，进入该路径下的 <code>xwechat_files</code> 文件夹即可。</p>
               </details>
 
-              <div id="detectResults" class="detect-results hidden"></div>
-
               <label class="field step2-field">
                 <div class="input-row">
                   <input id="wxDir" type="text" placeholder="例如 D:\WeChat\xwechat_files" />
@@ -133,7 +131,7 @@
                 <span class="step2-num" aria-hidden="true">2</span>
                 <div class="step2-block-title">
                   <h3 id="step2Block2Title">选择账号</h3>
-                  <p>该目录下检测到的微信账号</p>
+                  <p>首次使用且尚未解密时，暂只显示 wxid；扫描会话后会自动解密并显示昵称和头像</p>
                 </div>
                 <button id="refreshAccountsBtn" class="btn ghost step2-block-action" type="button">刷新</button>
               </header>

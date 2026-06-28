@@ -647,10 +647,6 @@ select:focus {
   background: #fff;
 }
 
-.step2-block .detect-results {
-  margin-bottom: 12px;
-}
-
 .step2-actions {
   margin-top: 18px;
   padding-top: 18px;
@@ -763,34 +759,6 @@ select:focus {
 .format-chip:has(input:checked) {
   border-color: rgba(7, 193, 96, 0.45);
   background: var(--primary-soft);
-  color: #166534;
-}
-
-.detect-results {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 14px;
-}
-
-.detect-results.hidden {
-  display: none;
-}
-
-.detect-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 10px;
-  background: var(--primary-soft);
-  border: 1px solid rgba(7, 193, 96, 0.18);
-  font-size: 13px;
-}
-
-.detect-item code {
-  font-size: 12px;
   color: #166534;
 }
 
