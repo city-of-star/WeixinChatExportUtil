@@ -19,7 +19,6 @@ let scanCancelRequested = false;
 let exportCancelRequested = false;
 let currentWorker = null;
 let scanWorker = null;
-let profileWorker = null;
 
 function getSettingsPath() {
   return path.join(app.getPath('userData'), 'wetrace-settings.json');
@@ -117,25 +116,18 @@ function runScanWorker(options) {
   });
 }
 
-function runProfileWorker(accounts) {
-  return new Promise((resolve, reject) => {
-    if (profileWorker) {
-      profileWorker.terminate().catch(() => {});
-      profileWorker = null;
-    }
+let profileWorkerChain = Promise.resolve();
 
+function runProfileWorkerOnce(accounts) {
+  return new Promise((resolve, reject) => {
     let settled = false;
     const worker = new Worker(path.join(__dirname, 'profileWorker.js'), {
       workerData: { accounts: accounts || [] },
     });
-    profileWorker = worker;
 
     const finish = (handler, value) => {
       if (settled) return;
       settled = true;
-      if (profileWorker === worker) {
-        profileWorker = null;
-      }
       worker.terminate().catch(() => {});
       handler(value);
     };
@@ -156,6 +148,12 @@ function runProfileWorker(accounts) {
       }
     });
   });
+}
+
+function runProfileWorker(accounts) {
+  const job = profileWorkerChain.then(() => runProfileWorkerOnce(accounts));
+  profileWorkerChain = job.catch(() => {});
+  return job;
 }
 
 ipcMain.handle('load-settings', async () => {

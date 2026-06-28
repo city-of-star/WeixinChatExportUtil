@@ -20,6 +20,7 @@ const readinessHint = document.getElementById('readinessHint');
 const readinessSuggestions = document.getElementById('readinessSuggestions');
 const detectResults = document.getElementById('detectResults');
 const autoDetectBtn = document.getElementById('autoDetectBtn');
+const refreshAccountsBtn = document.getElementById('refreshAccountsBtn');
 const scanBtn = document.getElementById('scanBtn');
 const step1Panel = document.getElementById('step1Panel');
 const step2Panel = document.getElementById('step2Panel');
@@ -76,25 +77,48 @@ let conversationCacheEntries = [];
 const accountProfileCache = new Map();
 let profileLoadToken = 0;
 
+function isRealDisplayName(displayName, wxid) {
+  return Boolean(displayName && displayName !== wxid);
+}
+
+function mergeAccountProfile(account, cached) {
+  if (!cached) return account;
+
+  const wxid = account.wxid;
+  const cachedName = isRealDisplayName(cached.displayName, wxid) ? cached.displayName : null;
+  const accountName = isRealDisplayName(account.displayName, wxid) ? account.displayName : null;
+
+  return {
+    ...account,
+    displayName: accountName || cachedName || account.displayName || cached.displayName || wxid,
+    avatar: account.avatar || cached.avatar || null,
+  };
+}
+
 function cacheAccountProfiles(accounts) {
   for (const account of accounts) {
+    const prev = accountProfileCache.get(account.path);
+    const wxid = account.wxid;
+    const nextName = isRealDisplayName(account.displayName, wxid)
+      ? account.displayName
+      : isRealDisplayName(prev?.displayName, wxid)
+        ? prev.displayName
+        : account.displayName;
+    const nextAvatar = account.avatar || prev?.avatar || null;
+
+    if (!isRealDisplayName(nextName, wxid) && !nextAvatar && prev) {
+      continue;
+    }
+
     accountProfileCache.set(account.path, {
-      displayName: account.displayName,
-      avatar: account.avatar,
+      displayName: nextName,
+      avatar: nextAvatar,
     });
   }
 }
 
 function applyProfileCache(accounts) {
-  return accounts.map((account) => {
-    const cached = accountProfileCache.get(account.path);
-    if (!cached) return account;
-    return {
-      ...account,
-      displayName: cached.displayName || account.displayName || account.wxid,
-      avatar: cached.avatar || account.avatar,
-    };
-  });
+  return accounts.map((account) => mergeAccountProfile(account, accountProfileCache.get(account.path)));
 }
 
 function loadSettingsLocal() {
@@ -190,6 +214,9 @@ function canNavigateToStep(step) {
 }
 
 function updateStepNavUI() {
+  if (refreshAccountsBtn) {
+    refreshAccountsBtn.disabled = scanRunning;
+  }
   stepEls.forEach((el) => {
     const n = Number(el.dataset.step);
     const clickable = canNavigateToStep(n);
@@ -208,6 +235,7 @@ function updateStepNavUI() {
 }
 
 function setStep(step) {
+  const wasStep = currentStep;
   currentStep = step;
   step1Panel.classList.toggle('hidden', step !== 1);
   step2Panel.classList.toggle('hidden', step !== 2);
@@ -220,6 +248,9 @@ function setStep(step) {
     el.classList.toggle('active', n === step);
     el.classList.toggle('done', n < step);
   });
+  if (step === 2 && wasStep > 2) {
+    void refreshWxAccountList({ silent: true });
+  }
   updateStepNavUI();
 }
 
@@ -418,7 +449,8 @@ function renderReadiness(readiness) {
   readinessPanel.classList.remove('hidden');
   const levelMap = {
     ready: { text: '微信已登录', className: 'ready' },
-    fallback: { text: '微信已登录', className: 'fallback' },
+    fallback: { text: '未登录此账号', className: 'fallback' },
+    offline: { text: '可离线扫描', className: 'fallback' },
     maybe: { text: '建议预热', className: 'maybe' },
     not_ready: { text: '微信未运行', className: 'not-ready' },
   };
@@ -482,6 +514,45 @@ async function validateWxDir(dir, accountPath = null) {
   renderReadiness(result.readiness);
   void refreshConversationCacheHint();
   return result;
+}
+
+async function refreshWxAccountList({ silent = false } = {}) {
+  const rootDir = wxDirInput.value.trim();
+  if (!rootDir) {
+    if (!silent) {
+      wxDirHint.textContent = '请先选择微信数据目录';
+      wxDirHint.className = 'hint error';
+    }
+    return;
+  }
+  if (scanRunning) {
+    return;
+  }
+
+  const accountPath = getSelectedAccountPath();
+
+  if (!silent) {
+    refreshAccountsBtn.disabled = true;
+    refreshAccountsBtn.textContent = '刷新中…';
+  }
+
+  try {
+    await validateWxDir(rootDir, accountPath);
+    if (accountPath) {
+      const status = await window.exporter.checkWeChatStatus({
+        wxDir: rootDir,
+        accountPath,
+      });
+      if (status.ok) {
+        renderReadiness(status.readiness);
+      }
+    }
+  } finally {
+    if (!silent) {
+      refreshAccountsBtn.disabled = scanRunning;
+      refreshAccountsBtn.textContent = '刷新';
+    }
+  }
 }
 
 async function pickDirectory(title, targetInput) {
@@ -1314,6 +1385,10 @@ document.getElementById('pickOutputDir').addEventListener('click', () => {
 wxDirInput.addEventListener('change', () => {
   saveSettings();
   void validateWxDir(wxDirInput.value.trim());
+});
+
+refreshAccountsBtn.addEventListener('click', () => {
+  void refreshWxAccountList();
 });
 
 autoDetectBtn.addEventListener('click', async () => {
