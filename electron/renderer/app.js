@@ -50,7 +50,6 @@ const logEl = document.getElementById('log');
 const successSummary = document.getElementById('successSummary');
 const voiceTranscriptionBlock = document.getElementById('voiceTranscriptionBlock');
 const voiceTranscriptionInput = document.getElementById('voiceTranscription');
-const voiceTranscriptionNotice = document.getElementById('voiceTranscriptionNotice');
 
 let whisperModelBundled = false;
 const appVersion = document.getElementById('appVersion');
@@ -170,7 +169,6 @@ function applySettingsToForm(settings) {
   }
   if (voiceTranscriptionInput && whisperModelBundled) {
     voiceTranscriptionInput.checked = Boolean(settings.voiceTranscription);
-    updateVoiceTranscriptionNotice();
   }
   if (settings.accountPath) {
     selectedAccountPath = settings.accountPath;
@@ -189,15 +187,13 @@ function updateVoiceTranscriptionUI() {
   if (voiceTranscriptionBlock) {
     voiceTranscriptionBlock.classList.toggle('hidden', !whisperModelBundled);
   }
+  const progressStepNum = document.getElementById('step4BlockProgressNum');
+  if (progressStepNum) {
+    progressStepNum.textContent = whisperModelBundled ? '4' : '3';
+  }
   if (!whisperModelBundled && voiceTranscriptionInput) {
     voiceTranscriptionInput.checked = false;
   }
-  updateVoiceTranscriptionNotice();
-}
-
-function updateVoiceTranscriptionNotice() {
-  if (!voiceTranscriptionNotice || !voiceTranscriptionInput) return;
-  voiceTranscriptionNotice.classList.toggle('hidden', !voiceTranscriptionInput.checked);
 }
 
 function isVoiceTranscriptionEnabled() {
@@ -1357,11 +1353,6 @@ async function startExport() {
     return;
   }
 
-  if (options.voiceTranscription) {
-    const confirmed = await showVoiceTranscriptionConfirm();
-    if (!confirmed) return;
-  }
-
   exportRunning = true;
   updateStepNavUI();
   startBtn.disabled = true;
@@ -1561,25 +1552,7 @@ document.querySelectorAll('input[name="format"]').forEach((input) => {
   input.addEventListener('change', saveSettings);
 });
 
-voiceTranscriptionInput?.addEventListener('change', () => {
-  updateVoiceTranscriptionNotice();
-  saveSettings();
-});
-
-function showVoiceTranscriptionConfirm() {
-  return showAppNotice({
-    title: '启用语音转文字？',
-    message: '该功能会在本地识别语音并写入导出文件，转写过程可能花费较长时间。',
-    detail:
-      '· 每条语音大约需要数秒，语音多的会话请预留充足时间\n' +
-      '· 识别结果会缓存在微信账号目录，重复导出同一语音会更快\n' +
-      '· 不会保存原始语音文件，也不会上传到云端',
-    tone: 'guide',
-    confirm: true,
-    confirmLabel: '继续导出',
-    cancelLabel: '取消',
-  });
-}
+voiceTranscriptionInput?.addEventListener('change', saveSettings);
 
 window.exporter.onProgress((event) => {
   if (event.phase === 'scan' || event.phase === 'init' || event.phase === 'decrypt' || event.phase === 'keys') {
