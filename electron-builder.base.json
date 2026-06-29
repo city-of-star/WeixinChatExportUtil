@@ -24,6 +24,20 @@
     "node_modules/silk-wasm/**",
     "assets/dll/**"
   ],
+  "extraResources": [
+    {
+      "from": "assets/models",
+      "to": "models",
+      "filter": [
+        "**/*.json",
+        "**/*.txt",
+        "**/onnx/encoder_model_quantized.onnx",
+        "**/onnx/decoder_model_merged_quantized.onnx",
+        "!**/.staging-cache/**",
+        "!**/.gitkeep"
+      ]
+    }
+  ],
   "win": {
     "target": [
       {

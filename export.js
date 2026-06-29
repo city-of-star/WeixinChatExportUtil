@@ -26,7 +26,7 @@ function parseArgs(argv) {
       args.voiceTranscription = true;
     } else if (arg === '--help' || arg === '-h') {
       console.log('Usage: node export.js [--wx-dir PATH] [--output PATH] [--self-wxid WXID] [--voice-transcription]');
-      console.log('  --voice-transcription  仅完整版或已下载模型的开发环境可用');
+      console.log('  --voice-transcription  需先执行 npm run download-whisper-model 下载模型');
       process.exit(0);
     }
   }

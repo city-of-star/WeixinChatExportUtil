@@ -185,7 +185,6 @@ ipcMain.handle('get-app-info', async () => {
     description: '珍藏每一段对话',
     whisperModelBundled,
     voiceTranscriptionAvailable: isVoiceTranscriptionAvailable(),
-    variant: whisperModelBundled ? 'full' : 'standard',
   };
 });
 

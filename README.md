@@ -38,8 +38,8 @@
 - 👥 支持多账号切换，自动检测微信数据目录
 - 💬 按会话筛选导出，支持搜索会话名称
 - 🖥️ 图形界面（Electron），操作简单，步骤引导
-- 🎙️ **完整版**支持语音转文字（内置模型，全程本地识别）
-- 📦 支持便携版和安装包两种分发方式（标准版 / 完整版）
+- 🎙️ 支持语音转文字（内置模型，全程本地识别）
+- 📦 支持便携版和安装包两种分发方式
 
 ---
 
@@ -106,21 +106,21 @@ npm start
 npm run build:hook
 ```
 
-便携版 exe 有两种，按需选择：
+便携版 exe：
 
-| 版本 | 命令 | 说明 |
-|------|------|------|
-| **标准版**（体积小） | `npm run dist:portable` | 聊天记录导出；**不含**语音转文字 |
-| **完整版**（含语音模型） | `npm run dist:portable:full` | 在标准版基础上增加语音转文字（内置模型，全程离线） |
+```bash
+npm run dist
+```
 
-产物在 `dist/` 目录，文件名类似：
+安装包（NSIS）：
 
-- `微迹 Wetrace-1.0.0-portable.exe`
-- `微迹 Wetrace 完整版-1.0.0-portable.exe`
+```bash
+npm run dist:installer
+```
 
-安装包（NSIS）对应命令：`npm run dist:installer` / `npm run dist:installer:full`
+产物在 `dist/` 目录，文件名类似 `微迹 Wetrace-1.0.0-portable.exe`。
 
-下载语音模型若遇 SSL 证书错误，可尝试国内镜像：
+打包时会自动下载语音转文字模型（约 250MB）。若下载遇 SSL 证书错误，可尝试国内镜像：
 
 ```bash
 # 方式一：HuggingFace 国内镜像（推荐）

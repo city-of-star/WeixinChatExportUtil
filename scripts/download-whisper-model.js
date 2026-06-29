@@ -124,7 +124,7 @@ async function main() {
   }
 
   console.log(`正在下载 ${MODEL_ID} …`);
-  console.log('（约 250MB，仅打包「完整版」时需要，不会提交到 Git）');
+  console.log('（约 250MB，打包发布时需要，不会提交到 Git）');
 
   const files = await listModelFiles();
   console.log(`共 ${files.length} 个文件待下载`);
