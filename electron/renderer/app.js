@@ -26,6 +26,8 @@ const preflightModalPrimaryBtn = document.getElementById('preflightModalPrimaryB
 const preflightModalCancelBtn = document.getElementById('preflightModalCancelBtn');
 const autoDetectBtn = document.getElementById('autoDetectBtn');
 const refreshAccountsBtn = document.getElementById('refreshAccountsBtn');
+const resetDecryptBtn = document.getElementById('resetDecryptBtn');
+const resetAppDataBtn = document.getElementById('resetAppDataBtn');
 const scanBtn = document.getElementById('scanBtn');
 const step1Panel = document.getElementById('step1Panel');
 const step2Panel = document.getElementById('step2Panel');
@@ -1616,6 +1618,108 @@ function renderConversationCacheList(caches, selectedPath) {
   }
 }
 
+async function handleResetAccountDecryptData() {
+  if (scanRunning || exportRunning) {
+    await showFriendlyError('请稍候', '请等待当前任务结束。');
+    return;
+  }
+
+  const accountPath = getSelectedAccountPath();
+  if (!accountPath) {
+    await showFriendlyError('请选择账号', '请先选择微信账号。');
+    return;
+  }
+
+  const label = getAccountLabel(accountPath, {});
+  const confirmed = await showConfirmDialog({
+    title: '重置解密数据',
+    message: `清除「${label}」的解密缓存？需重新解密。`,
+    tone: 'warn',
+    confirmLabel: '重置',
+    dangerConfirm: true,
+  });
+  if (!confirmed) {
+    return;
+  }
+
+  const result = await window.exporter.resetAccountDecryptData({ accountPath });
+  if (!result.ok) {
+    await showFriendlyError('重置失败', result.error || '操作失败');
+    return;
+  }
+
+  if (getSelectedAccountPath() === accountPath) {
+    currentConversationCache = null;
+  }
+
+  const rootDir = wxDirInput.value.trim();
+  if (rootDir) {
+    await validateWxDir(rootDir, accountPath);
+  }
+  void refreshConversationCacheHint();
+
+  await showAppNotice({
+    title: '已重置',
+    message: '请重新点击「扫描会话」完成解密。',
+    tone: 'guide',
+  });
+}
+
+async function handleResetAppData() {
+  if (scanRunning || exportRunning) {
+    await showFriendlyError('请稍候', '请等待当前任务结束。');
+    return;
+  }
+
+  const confirmed = await showConfirmDialog({
+    title: '重置应用数据',
+    message: '清除设置、诊断日志和历史扫描记录？',
+    tone: 'warn',
+    confirmLabel: '重置',
+    dangerConfirm: true,
+  });
+  if (!confirmed) {
+    return;
+  }
+
+  const result = await window.exporter.resetAppData();
+  if (!result.ok) {
+    await showFriendlyError('重置失败', result.error || '操作失败');
+    return;
+  }
+
+  wxDirInput.value = '';
+  outputDirInput.value = '';
+  selectedAccountPath = null;
+  resolvedAccountPath = null;
+  currentConversationCache = null;
+  conversationCacheEntries = [];
+  accountProfileCache.clear();
+  accountField.classList.add('hidden');
+  cacheSection.classList.add('hidden');
+  cacheList.innerHTML = '';
+  accountList.innerHTML = '';
+  accountHint.textContent = '';
+  readinessPanel.classList.add('hidden');
+
+  for (const input of document.querySelectorAll('input[name="format"]')) {
+    input.checked = input.value === 'html';
+  }
+  if (voiceTranscriptionInput) {
+    voiceTranscriptionInput.checked = false;
+  }
+
+  const minimalSettings = { disclaimerAccepted: disclaimerAccepted.checked };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(minimalSettings));
+  window.exporter.saveSettings(minimalSettings).catch(() => {});
+
+  await showAppNotice({
+    title: '已重置',
+    message: '请重新选择微信数据目录。',
+    tone: 'guide',
+  });
+}
+
 async function deleteConversationCache(accountPath) {
   let cache = conversationCacheEntries.find((item) => item.accountPath === accountPath);
   const wxid = getWxidFromPath(accountPath, cache?.selfWxid);
@@ -1959,6 +2063,14 @@ wxDirInput.addEventListener('change', () => {
 
 refreshAccountsBtn.addEventListener('click', () => {
   void refreshWxAccountList();
+});
+
+resetDecryptBtn?.addEventListener('click', () => {
+  void handleResetAccountDecryptData();
+});
+
+resetAppDataBtn?.addEventListener('click', () => {
+  void handleResetAppData();
 });
 
 autoDetectBtn.addEventListener('click', async () => {

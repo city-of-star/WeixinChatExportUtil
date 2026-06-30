@@ -441,6 +441,41 @@ ipcMain.handle('open-log-dir', async () => {
   return { ok: true, logDir };
 });
 
+ipcMain.handle('reset-account-decrypt-data', async (_event, payload) => {
+  if (scanRunning || exportRunning) {
+    return { ok: false, error: '扫描或导出进行中，请稍后再试' };
+  }
+  try {
+    const accountPath = payload?.accountPath;
+    if (!accountPath) {
+      return { ok: false, error: '未选择账号' };
+    }
+    const { resetAccountDecryptData } = require('../lib/dataReset');
+    const result = resetAccountDecryptData(accountPath);
+    clearConversationCache(getConversationCachePath(), result.accountPath);
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('reset-app-data', async () => {
+  if (scanRunning || exportRunning) {
+    return { ok: false, error: '扫描或导出进行中，请稍后再试' };
+  }
+  try {
+    const { resetAppData } = require('../lib/dataReset');
+    const userDataPath = app.getPath('userData');
+    const result = resetAppData(userDataPath, {
+      conversationCachePath: getConversationCachePath(),
+      settingsPath: getSettingsPath(),
+    });
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 ipcMain.handle('scan-conversations', async (_event, options) => {
   if (scanRunning) {
     return { ok: false, error: '扫描正在进行中' };

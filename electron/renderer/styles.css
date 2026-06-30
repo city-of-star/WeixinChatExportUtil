@@ -592,6 +592,58 @@ select:focus {
   border-color: rgba(7, 193, 96, 0.18);
 }
 
+.step2-tip-neutral {
+  background: #f8fafc;
+  border-color: rgba(100, 116, 139, 0.16);
+  color: #475569;
+}
+
+.step2-tip-neutral summary {
+  color: #64748b;
+}
+
+.advanced-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 10px;
+}
+
+.advanced-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid rgba(100, 116, 139, 0.14);
+}
+
+.advanced-item-info {
+  min-width: 0;
+  flex: 1;
+}
+
+.advanced-item-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.advanced-item-meta {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.advanced-item .btn {
+  flex-shrink: 0;
+  padding: 7px 12px;
+  font-size: 13px;
+}
+
 .step2-block-head {
   display: flex;
   align-items: flex-start;

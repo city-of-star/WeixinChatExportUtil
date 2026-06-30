@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld('exporter', {
   runPreflight: (payload) => ipcRenderer.invoke('run-preflight', payload),
   getLogDir: () => ipcRenderer.invoke('get-log-dir'),
   openLogDir: () => ipcRenderer.invoke('open-log-dir'),
+  resetAccountDecryptData: (payload) => ipcRenderer.invoke('reset-account-decrypt-data', payload),
+  resetAppData: () => ipcRenderer.invoke('reset-app-data'),
   scanConversations: (options) => ipcRenderer.invoke('scan-conversations', options),
   cancelScan: () => ipcRenderer.invoke('cancel-scan'),
   loadConversationCache: (payload) => ipcRenderer.invoke('load-conversation-cache', payload),
