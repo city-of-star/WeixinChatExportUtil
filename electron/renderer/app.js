@@ -1128,6 +1128,11 @@ function friendlyScanMessage(event) {
   const msg = event?.message || '';
   const phase = event?.phase || '';
 
+  if (phase === 'scan' && event.subphase === 'counting' && event.total) {
+    const current = event.current || 0;
+    return `已统计 ${formatCount(current)} / ${formatCount(event.total)} 个会话`;
+  }
+
   if (phase === 'decrypt' && event.current && event.total) {
     return `正在解密数据（${event.current}/${event.total}）…`;
   }
@@ -1186,6 +1191,7 @@ function friendlyScanMessage(event) {
 function friendlyScanTitle(event) {
   const phase = event?.phase || '';
   const msg = event?.message || '';
+  if (phase === 'scan' && event.subphase === 'counting') return '正在统计会话';
   if (phase === 'keys') return '正在获取密钥';
   if (phase === 'decrypt') {
     if (msg.includes('解密中') || msg.includes('解密数据库')) return '正在解密';
@@ -1223,6 +1229,10 @@ function friendlyScanNote(event) {
 
   if (phase === 'decrypt' && (msg.includes('提取') || msg.includes('密钥'))) {
     return '首次扫描需要获取解密密钥。若弹出微信，请点击「登录」。';
+  }
+
+  if (phase === 'scan' && event.subphase === 'counting') {
+    return '正在逐个统计消息数量，数据量较大时可能需要较长时间，请耐心等待。';
   }
 
   return '首次扫描可能需要几分钟。若弹出微信，请点击「登录」';
