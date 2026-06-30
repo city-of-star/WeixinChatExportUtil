@@ -77,6 +77,7 @@ let userCancelledScan = false;
 let scanElapsedTimer = null;
 let scanStartedAt = 0;
 let currentConversationCache = null;
+let outputDirNonEmptyAcknowledged = null;
 let conversationCacheEntries = [];
 const accountProfileCache = new Map();
 let profileLoadToken = 0;
@@ -587,6 +588,36 @@ async function refreshWxAccountList({ silent = false } = {}) {
   }
 }
 
+function resetOutputDirNonEmptyAck() {
+  outputDirNonEmptyAcknowledged = null;
+}
+
+const OUTPUT_DIR_NON_EMPTY_NOTICE = {
+  title: '文件夹不为空',
+  message: '所选导出目录已有文件，导出时可能会覆盖同名文件。',
+  detail: '建议选择空文件夹，以免意外覆盖已有内容。',
+};
+
+async function confirmOutputDirIfNotEmpty(dirPath) {
+  if (!dirPath) return true;
+  if (outputDirNonEmptyAcknowledged === dirPath) return true;
+
+  const check = await window.exporter.isDirectoryEmpty(dirPath);
+  if (!check.ok || check.empty) return true;
+
+  const proceed = await showConfirmDialog({
+    ...OUTPUT_DIR_NON_EMPTY_NOTICE,
+    tone: 'warn',
+    confirmLabel: '继续导出',
+    cancelLabel: '取消',
+    preferCancel: true,
+  });
+  if (proceed) {
+    outputDirNonEmptyAcknowledged = dirPath;
+  }
+  return proceed;
+}
+
 async function pickDirectory(title, targetInput) {
   const selected = await window.exporter.pickDirectory({
     title,
@@ -597,6 +628,8 @@ async function pickDirectory(title, targetInput) {
     saveSettings();
     if (targetInput === wxDirInput) {
       void validateWxDir(selected);
+    } else if (targetInput === outputDirInput) {
+      resetOutputDirNonEmptyAck();
     }
   }
 }
@@ -716,8 +749,10 @@ const NOTICE_ICON = {
 function finishAppNotice(result) {
   appNotice.classList.add('hidden');
   appNoticeCancelBtn.classList.add('hidden');
+  appNoticeCancelBtn.classList.remove('primary');
+  appNoticeCancelBtn.classList.add('secondary');
   appNoticeActions.classList.remove('confirm-mode');
-  appNoticeBtn.classList.remove('danger');
+  appNoticeBtn.classList.remove('danger', 'secondary');
   appNoticeBtn.classList.add('primary');
   appNoticeBtn.textContent = '知道了';
   noticeMode = 'alert';
@@ -746,6 +781,7 @@ function showAppNotice({
   confirmLabel = '确定',
   cancelLabel = '取消',
   dangerConfirm = false,
+  preferCancel = false,
 }) {
   return new Promise((resolve) => {
     noticeResolve = resolve;
@@ -767,16 +803,36 @@ function showAppNotice({
       appNoticeCancelBtn.classList.remove('hidden');
       appNoticeActions.classList.add('confirm-mode');
       appNoticeBtn.textContent = confirmLabel;
-      appNoticeBtn.classList.toggle('primary', !dangerConfirm);
-      appNoticeBtn.classList.toggle('danger', dangerConfirm);
+      if (preferCancel) {
+        appNoticeCancelBtn.classList.remove('secondary');
+        appNoticeCancelBtn.classList.add('primary');
+        appNoticeBtn.classList.remove('primary', 'danger');
+        appNoticeBtn.classList.add('secondary');
+      } else {
+        appNoticeCancelBtn.classList.remove('primary');
+        appNoticeCancelBtn.classList.add('secondary');
+        appNoticeBtn.classList.remove('secondary');
+        appNoticeBtn.classList.toggle('primary', !dangerConfirm);
+        appNoticeBtn.classList.toggle('danger', dangerConfirm);
+      }
     }
 
     appNotice.classList.remove('hidden');
-    (confirm ? appNoticeCancelBtn : appNoticeBtn).focus();
+    const focusTarget = confirm ? (preferCancel ? appNoticeCancelBtn : appNoticeBtn) : appNoticeBtn;
+    focusTarget.focus();
   });
 }
 
-async function showConfirmDialog({ title, message, detail, tone = 'warn', confirmLabel = '确定', cancelLabel = '取消', dangerConfirm = false }) {
+async function showConfirmDialog({
+  title,
+  message,
+  detail,
+  tone = 'warn',
+  confirmLabel = '确定',
+  cancelLabel = '取消',
+  dangerConfirm = false,
+  preferCancel = false,
+}) {
   return showAppNotice({
     title,
     message,
@@ -786,6 +842,7 @@ async function showConfirmDialog({ title, message, detail, tone = 'warn', confir
     confirmLabel,
     cancelLabel,
     dangerConfirm,
+    preferCancel,
   });
 }
 
@@ -1353,6 +1410,11 @@ async function startExport() {
     return;
   }
 
+  const canProceed = await confirmOutputDirIfNotEmpty(options.outputDir);
+  if (!canProceed) {
+    return;
+  }
+
   exportRunning = true;
   updateStepNavUI();
   startBtn.disabled = true;
@@ -1381,6 +1443,7 @@ async function startExport() {
   startBtn.disabled = false;
 
   if (result.ok) {
+    resetOutputDirNonEmptyAck();
     lastOutputDir = result.result.outputDir;
     lastHtmlIndexPath = result.result.htmlIndexPath || '';
     openOutputBtn.disabled = false;
@@ -1435,6 +1498,11 @@ document.getElementById('pickWxDir').addEventListener('click', () => {
 
 document.getElementById('pickOutputDir').addEventListener('click', () => {
   pickDirectory('选择导出目录', outputDirInput);
+});
+
+outputDirInput.addEventListener('change', () => {
+  resetOutputDirNonEmptyAck();
+  saveSettings();
 });
 
 wxDirInput.addEventListener('change', () => {

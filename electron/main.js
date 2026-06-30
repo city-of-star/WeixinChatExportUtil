@@ -224,6 +224,22 @@ ipcMain.handle('pick-directory', async (_event, { title, defaultPath }) => {
   return result.filePaths[0];
 });
 
+ipcMain.handle('is-directory-empty', async (_event, dirPath) => {
+  try {
+    if (!dirPath || !fs.existsSync(dirPath)) {
+      return { ok: true, empty: true };
+    }
+    const stat = fs.statSync(dirPath);
+    if (!stat.isDirectory()) {
+      return { ok: false, error: '路径不是文件夹' };
+    }
+    const entries = fs.readdirSync(dirPath);
+    return { ok: true, empty: entries.length === 0, count: entries.length };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 ipcMain.handle('validate-wx-dir', async (_event, payload) => {
   const wxDir = typeof payload === 'string' ? payload : payload?.wxDir;
   const accountPath = typeof payload === 'object' ? payload?.accountPath : null;

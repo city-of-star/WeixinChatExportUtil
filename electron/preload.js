@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('exporter', {
   getAppInfo: () => ipcRenderer.invoke('get-app-info'),
   detectWxPaths: () => ipcRenderer.invoke('detect-wx-paths'),
   pickDirectory: (options) => ipcRenderer.invoke('pick-directory', options),
+  isDirectoryEmpty: (dirPath) => ipcRenderer.invoke('is-directory-empty', dirPath),
   pickFile: (options) => ipcRenderer.invoke('pick-file', options),
   validateWxDir: (payload) => ipcRenderer.invoke('validate-wx-dir', payload),
   enrichAccounts: (payload) => ipcRenderer.invoke('enrich-accounts', payload),
