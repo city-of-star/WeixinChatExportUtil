@@ -198,6 +198,51 @@ body {
   margin: 6px 0 0;
   color: var(--muted);
   font-size: 13px;
+  line-height: 1.55;
+  transition: color 0.35s ease;
+}
+
+.subhead.summary-highlight {
+  color: #047857;
+}
+
+.export-summary-line {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.65;
+}
+
+.export-time-line {
+  margin: 8px 0 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2937;
+  line-height: 1.55;
+  transition: color 0.35s ease;
+}
+
+.export-time-line.hidden {
+  display: none;
+}
+
+.export-time-line.summary-highlight {
+  color: #047857;
+}
+
+.voice-chip {
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+
+.voice-time-hint {
+  font-size: 12px;
+  font-weight: 500;
+  color: #b45309;
+}
+
+.voice-time-hint:empty {
+  display: none;
 }
 
 .field {
@@ -509,11 +554,11 @@ select:focus {
 }
 
 .step2-intro {
-  margin-bottom: 20px;
+  margin-bottom: 24px;
 }
 
 .step2-intro h2 {
-  margin: 0 0 6px;
+  margin: 0 0 14px;
   font-size: 18px;
 }
 
@@ -544,6 +589,10 @@ select:focus {
   align-items: flex-start;
   gap: 12px;
   margin-bottom: 14px;
+}
+
+.step2-block-head-compact {
+  margin-bottom: 10px;
 }
 
 .step2-num {
@@ -593,7 +642,7 @@ select:focus {
 }
 
 .step2-tip {
-  margin: -4px 0 12px;
+  margin: 12px 0 0;
   padding: 0 10px;
   border-radius: 10px;
   background: #eff6ff;

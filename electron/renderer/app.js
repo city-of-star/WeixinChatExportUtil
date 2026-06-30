@@ -36,6 +36,7 @@ const outputGuide = document.getElementById('outputGuide');
 const convList = document.getElementById('convList');
 const convSummary = document.getElementById('convSummary');
 const exportSummary = document.getElementById('exportSummary');
+const exportEstimateLine = document.getElementById('exportEstimateLine');
 const convSearch = document.getElementById('convSearch');
 const selectAllBtn = document.getElementById('selectAllBtn');
 const selectNoneBtn = document.getElementById('selectNoneBtn');
@@ -50,6 +51,7 @@ const logEl = document.getElementById('log');
 const successSummary = document.getElementById('successSummary');
 const voiceTranscriptionBlock = document.getElementById('voiceTranscriptionBlock');
 const voiceTranscriptionInput = document.getElementById('voiceTranscription');
+const voiceTimeHint = document.getElementById('voiceTimeHint');
 
 let whisperModelBundled = false;
 const appVersion = document.getElementById('appVersion');
@@ -81,6 +83,9 @@ let outputDirNonEmptyAcknowledged = null;
 let conversationCacheEntries = [];
 const accountProfileCache = new Map();
 let profileLoadToken = 0;
+let estimateRequestId = 0;
+let exportStartedAt = 0;
+let voicePhaseStartedAt = 0;
 
 function isRealDisplayName(displayName, wxid) {
   return Boolean(displayName && displayName !== wxid);
@@ -190,7 +195,7 @@ function updateVoiceTranscriptionUI() {
   }
   const progressStepNum = document.getElementById('step4BlockProgressNum');
   if (progressStepNum) {
-    progressStepNum.textContent = whisperModelBundled ? '4' : '3';
+    progressStepNum.textContent = whisperModelBundled ? '5' : '4';
   }
   if (!whisperModelBundled && voiceTranscriptionInput) {
     voiceTranscriptionInput.checked = false;
@@ -277,6 +282,9 @@ function setStep(step) {
   if (step === 2 && wasStep > 2) {
     void refreshWxAccountList({ silent: true });
   }
+  if (step === 4) {
+    void refreshSelectionSummary();
+  }
   updateStepNavUI();
 }
 
@@ -312,6 +320,213 @@ function setProgress(percent, text) {
   } else if (percent > 0 || exportRunning) {
     progressText.classList.add('running');
   }
+}
+
+function formatRemaining(seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return null;
+  }
+  if (seconds < 20) {
+    return '即将完成';
+  }
+  if (seconds < 120) {
+    const rounded = Math.max(20, Math.round(seconds / 10) * 10);
+    return `约还需 ${rounded} 秒`;
+  }
+  return `约还需 ${Math.max(1, Math.round(seconds / 60))} 分钟`;
+}
+
+function getSelectionStats() {
+  const selected = getSelectedUsernames();
+  const items = conversationItems.filter((item) => selected.includes(item.username));
+  return {
+    conversationCount: items.length,
+    messageCount: items.reduce((sum, item) => sum + item.messageCount, 0),
+    voiceCount: items.reduce((sum, item) => sum + (item.voiceCount || 0), 0),
+  };
+}
+
+function buildSelectionLine(stats) {
+  if (!stats.conversationCount) {
+    return '';
+  }
+  const voicePart = stats.voiceCount > 0 ? `，${formatCount(stats.voiceCount)} 条语音` : '';
+  return `已选 ${stats.conversationCount} / ${conversationItems.length} 个会话，约 ${formatCount(stats.messageCount)} 条消息${voicePart}`;
+}
+
+function formatConvCountLabel(conv) {
+  const messagePart = `${formatCount(conv.messageCount)} 条`;
+  if (!conv.voiceCount) {
+    return messagePart;
+  }
+  return `${messagePart} · ${formatCount(conv.voiceCount)} 语音`;
+}
+
+function formatScanStatsSummary(result) {
+  const voiceTotal =
+    result.totalVoiceMessages ??
+    (result.conversations || []).reduce((sum, item) => sum + (item.voiceCount || 0), 0);
+  const voicePart = voiceTotal > 0 ? `，${formatCount(voiceTotal)} 条语音` : '';
+  return `${result.conversationCount} 个会话，${formatCount(result.totalMessages)} 条消息${voicePart}`;
+}
+
+function formatEstimateSnippet(estimate, { withVoiceTag = false } = {}) {
+  if (!estimate?.rangeText) {
+    return '';
+  }
+  const level = estimate.perfLevel ? `（本机 Lv.${estimate.perfLevel}）` : '';
+  const voiceTag = withVoiceTag ? ' · 含语音转写' : '';
+  return `预计导出耗时 ${estimate.rangeText}${level}${voiceTag}`;
+}
+
+function pulseSummaryLine() {
+  if (currentStep !== 4 || !exportEstimateLine) {
+    return;
+  }
+  exportEstimateLine.classList.add('summary-highlight');
+  window.setTimeout(() => exportEstimateLine.classList.remove('summary-highlight'), 700);
+}
+
+function renderVoiceTimeHint({ voiceOn, voiceEstimate, stats }) {
+  if (!voiceTimeHint) {
+    return;
+  }
+  voiceTimeHint.textContent = '';
+  if (!whisperModelBundled || currentStep !== 4 || voiceOn || !stats.voiceCount || !voiceEstimate?.rangeText) {
+    return;
+  }
+  voiceTimeHint.textContent = `→ ${voiceEstimate.rangeText}`;
+}
+
+function applySelectionSummary({ baseEstimate, voiceEstimate, voiceOn, stats }) {
+  const selectionLine = buildSelectionLine(stats);
+  const step4Estimate = voiceOn && voiceEstimate ? voiceEstimate : baseEstimate;
+  const estimateSnippet = formatEstimateSnippet(step4Estimate, {
+    withVoiceTag: voiceOn && stats.voiceCount > 0,
+  });
+
+  if (convSummary && currentStep === 3) {
+    convSummary.textContent = selectionLine || '—';
+  }
+  if (exportSummary && currentStep === 4) {
+    exportSummary.textContent = selectionLine || '确认保存位置与格式，然后开始导出。';
+  }
+  if (exportEstimateLine && currentStep === 4) {
+    exportEstimateLine.textContent = estimateSnippet;
+    exportEstimateLine.classList.toggle('hidden', !estimateSnippet);
+  }
+  renderVoiceTimeHint({ voiceOn, voiceEstimate, stats });
+}
+
+async function refreshSelectionSummary({ voiceTranscription = null, highlight = false } = {}) {
+  const stats = getSelectionStats();
+  const requestId = ++estimateRequestId;
+
+  if (!stats.conversationCount || !stats.messageCount) {
+    if (convSummary) convSummary.textContent = '—';
+    if (exportSummary) exportSummary.textContent = '确认保存位置与格式，然后开始导出。';
+    if (exportEstimateLine) {
+      exportEstimateLine.textContent = '';
+      exportEstimateLine.classList.add('hidden');
+    }
+    if (voiceTimeHint) voiceTimeHint.textContent = '';
+    return null;
+  }
+
+  if (currentStep === 3) {
+    if (convSummary) convSummary.textContent = buildSelectionLine(stats);
+    if (exportEstimateLine) {
+      exportEstimateLine.textContent = '';
+      exportEstimateLine.classList.add('hidden');
+    }
+    if (voiceTimeHint) voiceTimeHint.textContent = '';
+    return null;
+  }
+
+  const formatCount = Math.max(1, getSelectedFormats().length);
+  const voiceOn =
+    voiceTranscription === null ? isVoiceTranscriptionEnabled() : Boolean(voiceTranscription);
+  const showVoiceOn = currentStep === 4 && voiceOn;
+
+  try {
+    const estimateParams = { ...stats, formatCount };
+    const [baseEstimate, voiceEstimate] = await Promise.all([
+      window.exporter.estimateExport({ ...estimateParams, voiceTranscription: false }),
+      whisperModelBundled && stats.voiceCount > 0
+        ? window.exporter.estimateExport({ ...estimateParams, voiceTranscription: true })
+        : Promise.resolve(null),
+    ]);
+
+    if (requestId !== estimateRequestId) {
+      return null;
+    }
+
+    applySelectionSummary({
+      baseEstimate,
+      voiceEstimate,
+      voiceOn: showVoiceOn,
+      stats,
+    });
+
+    if (highlight) {
+      pulseSummaryLine();
+    }
+
+    return showVoiceOn && voiceEstimate ? voiceEstimate : baseEstimate;
+  } catch {
+    const fallback = buildSelectionLine(stats);
+    if (convSummary && currentStep === 3) convSummary.textContent = fallback || '—';
+    if (exportSummary && currentStep === 4) {
+      exportSummary.textContent = fallback || '确认保存位置与格式，然后开始导出。';
+    }
+    if (exportEstimateLine) {
+      exportEstimateLine.textContent = '';
+      exportEstimateLine.classList.add('hidden');
+    }
+    if (voiceTimeHint) voiceTimeHint.textContent = '';
+    return null;
+  }
+}
+
+function getDynamicEtaSuffix(event) {
+  if (!exportRunning || !exportStartedAt) {
+    return null;
+  }
+  const elapsedSec = (Date.now() - exportStartedAt) / 1000;
+  if (elapsedSec < 8) {
+    return null;
+  }
+
+  if (event.phase === 'exporting') {
+    const done = event.scanned || 0;
+    const total = event.totalCandidates || 0;
+    if (done <= 0 || total <= 0 || done >= total) {
+      return null;
+    }
+    const rate = done / elapsedSec;
+    return formatRemaining((total - done) / rate);
+  }
+
+  if (event.phase === 'voice-transcription' && event.subphase === 'transcribing') {
+    if (!voicePhaseStartedAt) {
+      voicePhaseStartedAt = Date.now();
+    }
+    const voiceElapsed = (Date.now() - voicePhaseStartedAt) / 1000;
+    const current = event.current || 0;
+    const total = event.total || 0;
+    if (voiceElapsed < 5 || current <= 1 || total <= 0 || current >= total) {
+      return null;
+    }
+    const rate = current / voiceElapsed;
+    return formatRemaining((total - current) / rate);
+  }
+
+  return null;
+}
+
+function setProgressWithEta(percent, text, event) {
+  const eta = event ? getDynamicEtaSuffix(event) : null;
+  setProgress(percent, eta ? `${text} · ${eta}` : text);
 }
 
 function getSelectedAccountPath() {
@@ -531,7 +746,7 @@ async function validateWxDir(dir, accountPath = null) {
   void loadAccountProfiles(result.accounts || []);
 
   if (result.needsAccountSelection) {
-    wxDirHint.textContent = result.hint;
+    wxDirHint.textContent = '';
     wxDirHint.className = 'hint';
     renderReadiness(null);
     resolvedAccountPath = null;
@@ -542,8 +757,8 @@ async function validateWxDir(dir, accountPath = null) {
   resolvedAccountPath = result.resolved;
   selectedAccountPath = result.resolved;
   updateAccountCardSelection();
-  wxDirHint.textContent = result.hint;
-  wxDirHint.className = 'hint ok';
+  wxDirHint.textContent = '';
+  wxDirHint.className = 'hint';
   renderReadiness(result.readiness);
   void refreshConversationCacheHint();
   return result;
@@ -678,7 +893,7 @@ function renderConversationList(conversations) {
 
     const count = document.createElement('div');
     count.className = 'conv-count';
-    count.textContent = `${formatCount(conv.messageCount)} 条`;
+    count.textContent = formatConvCountLabel(conv);
 
     item.appendChild(checkbox);
     item.appendChild(main);
@@ -703,11 +918,15 @@ function updateConvSummary() {
     .filter((item) => selected.includes(item.username))
     .reduce((sum, item) => sum + item.messageCount, 0);
 
-  const summaryText = `已选 ${selected.length} / ${conversationItems.length} 个会话，约 ${formatCount(selectedMessages)} 条消息`;
-  convSummary.textContent = summaryText;
+  const summaryText = buildSelectionLine({
+    conversationCount: selected.length,
+    messageCount: selectedMessages,
+  });
+  convSummary.textContent = summaryText || '—';
   if (exportSummary) {
-    exportSummary.textContent = summaryText;
+    exportSummary.textContent = summaryText || '确认保存位置与格式，然后开始导出。';
   }
+  void refreshSelectionSummary();
   toExportBtn.disabled = selected.length === 0;
   startBtn.disabled = exportRunning;
   updateStepNavUI();
@@ -1184,7 +1403,7 @@ function renderConversationCacheList(caches, selectedPath) {
     const meta = document.createElement('div');
     meta.className = 'cache-item-meta';
     const scannedAt = formatCacheTime(cache.scannedAt);
-    meta.textContent = `${cache.conversationCount} 个会话，约 ${formatCount(cache.totalMessages)} 条消息${scannedAt ? ` · ${scannedAt}` : ''}`;
+    meta.textContent = `${formatScanStatsSummary(cache)}${scannedAt ? ` · ${scannedAt}` : ''}`;
 
     info.appendChild(title);
     info.appendChild(meta);
@@ -1250,11 +1469,12 @@ async function deleteConversationCache(accountPath) {
 function applyConversationScanResult(result, { fromCache = false } = {}) {
   renderConversationList(result.conversations || []);
   setStep(3);
-  if (fromCache) {
-    appendLog(`已加载缓存：${result.conversationCount} 个会话，${formatCount(result.totalMessages)} 条消息`);
-  } else {
-    appendLog(`扫描完成：${result.conversationCount} 个会话，${formatCount(result.totalMessages)} 条消息`);
-  }
+  appendLog(
+    fromCache
+      ? `已加载缓存：${formatScanStatsSummary(result)}`
+      : `扫描完成：${formatScanStatsSummary(result)}`
+  );
+  void refreshSelectionSummary();
 }
 
 function renderOutputGuide(formats) {
@@ -1416,6 +1636,8 @@ async function startExport() {
   }
 
   exportRunning = true;
+  exportStartedAt = Date.now();
+  voicePhaseStartedAt = 0;
   updateStepNavUI();
   startBtn.disabled = true;
   cancelBtn.classList.remove('hidden');
@@ -1425,6 +1647,17 @@ async function startExport() {
   appendLog('开始导出…');
   saveSettings();
 
+  const exportStats = getSelectionStats();
+  const preEstimate = await window.exporter.estimateExport({
+    ...exportStats,
+    formatCount: Math.max(1, options.formats.length),
+    voiceTranscription: options.voiceTranscription,
+  }).catch(() => null);
+  if (preEstimate?.rangeText) {
+    appendLog(`预计耗时 ${preEstimate.rangeText}`);
+  }
+
+  const exportStartedAtMs = exportStartedAt;
   const result = await window.exporter.startExport({
     wxDir: resolvedAccountPath,
     outputDir: options.outputDir,
@@ -1437,12 +1670,21 @@ async function startExport() {
     voiceTranscription: options.voiceTranscription,
   });
 
+  const exportDurationSec = Math.max(1, (Date.now() - exportStartedAtMs) / 1000);
   exportRunning = false;
+  exportStartedAt = 0;
+  voicePhaseStartedAt = 0;
   updateStepNavUI();
   cancelBtn.classList.add('hidden');
   startBtn.disabled = false;
 
   if (result.ok) {
+    void window.exporter.recordExportPerf({
+      durationSec: exportDurationSec,
+      messageCount: result.result.totalMessages || exportStats.messageCount,
+      voiceCount: exportStats.voiceCount,
+      voiceTranscription: options.voiceTranscription,
+    }).catch(() => {});
     resetOutputDirNonEmptyAck();
     lastOutputDir = result.result.outputDir;
     lastHtmlIndexPath = result.result.htmlIndexPath || '';
@@ -1588,6 +1830,7 @@ toExportBtn.addEventListener('click', async () => {
     return;
   }
   setStep(4);
+  void refreshSelectionSummary({ highlight: true });
 });
 startBtn.addEventListener('click', startExport);
 cancelBtn.addEventListener('click', async () => {
@@ -1617,10 +1860,16 @@ restartBtn.addEventListener('click', () => {
 });
 
 document.querySelectorAll('input[name="format"]').forEach((input) => {
-  input.addEventListener('change', saveSettings);
+  input.addEventListener('change', () => {
+    saveSettings();
+    void refreshSelectionSummary();
+  });
 });
 
-voiceTranscriptionInput?.addEventListener('change', saveSettings);
+voiceTranscriptionInput?.addEventListener('change', () => {
+  saveSettings();
+  void refreshSelectionSummary({ highlight: true });
+});
 
 window.exporter.onProgress((event) => {
   if (event.phase === 'scan' || event.phase === 'init' || event.phase === 'decrypt' || event.phase === 'keys') {
@@ -1638,9 +1887,10 @@ window.exporter.onProgress((event) => {
     const percent = event.totalCandidates
       ? 25 + Math.round((event.scanned / event.totalCandidates) * 75)
       : 25;
-    setProgress(
+    setProgressWithEta(
       percent,
-      `正在导出 ${event.displayName}（${event.current}/${event.totalCandidates}）`
+      `正在导出 ${event.displayName}（${event.current}/${event.totalCandidates}）`,
+      event
     );
     if (event.current % 5 === 0) {
       appendLog(`已导出 ${event.current} 个会话，累计 ${formatCount(event.totalMessages)} 条消息`);
@@ -1648,10 +1898,11 @@ window.exporter.onProgress((event) => {
   } else if (event.phase === 'voice-transcription') {
     progressText.classList.add('running');
     if (event.subphase === 'model-load') {
+      voicePhaseStartedAt = 0;
       setProgress(8, '正在加载语音识别模型…');
     } else if (event.subphase === 'transcribing' && event.total) {
       const pct = 12 + Math.round((event.current / event.total) * 78);
-      setProgress(pct, event.message || '正在转写语音…');
+      setProgressWithEta(pct, event.message || '正在转写语音…', event);
     } else if (event.subphase === 'done') {
       setProgress(92, event.message || '语音转写完成');
     } else {

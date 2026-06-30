@@ -178,6 +178,7 @@ ipcMain.handle('save-settings', async (_event, settings) => {
 ipcMain.handle('get-app-info', async () => {
   const pkg = require('../package.json');
   const { isWhisperModelBundled, isVoiceTranscriptionAvailable } = require('../lib/voiceTranscription');
+  const { getPerfProfile } = require('../lib/exportEstimate');
   const whisperModelBundled = isWhisperModelBundled();
   return {
     name: app.getName() || pkg.build?.productName || '微迹 Wetrace',
@@ -185,7 +186,43 @@ ipcMain.handle('get-app-info', async () => {
     description: '珍藏每一段对话',
     whisperModelBundled,
     voiceTranscriptionAvailable: isVoiceTranscriptionAvailable(),
+    perfProfile: getPerfProfile(),
   };
+});
+
+ipcMain.handle('estimate-export', async (_event, params) => {
+  const { estimateExportDuration, getPerfProfile } = require('../lib/exportEstimate');
+  const settingsPath = getSettingsPath();
+  let learned = null;
+  try {
+    if (fs.existsSync(settingsPath)) {
+      learned = JSON.parse(fs.readFileSync(settingsPath, 'utf8')).exportPerf || null;
+    }
+  } catch {
+    // ignore broken settings
+  }
+  return estimateExportDuration({
+    perfProfile: getPerfProfile(),
+    ...(params || {}),
+    learned,
+  });
+});
+
+ipcMain.handle('record-export-perf', async (_event, sample) => {
+  const { recordExportSample } = require('../lib/exportEstimate');
+  const settingsPath = getSettingsPath();
+  let settings = {};
+  try {
+    if (fs.existsSync(settingsPath)) {
+      settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    }
+  } catch {
+    // ignore broken settings
+  }
+  settings.exportPerf = recordExportSample(settings.exportPerf, sample || {});
+  fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
+  return { ok: true, exportPerf: settings.exportPerf };
 });
 
 ipcMain.handle('detect-wx-paths', async () => {
@@ -341,6 +378,7 @@ ipcMain.handle('scan-conversations', async (_event, options) => {
       saveConversationCache(getConversationCachePath(), accountPath, {
         conversationCount: msg.conversationCount,
         totalMessages: msg.totalMessages,
+        totalVoiceMessages: msg.totalVoiceMessages,
         selfWxid: msg.selfWxid,
         displayName: options.displayName || null,
         conversations: msg.conversations,
@@ -350,6 +388,7 @@ ipcMain.handle('scan-conversations', async (_event, options) => {
         conversations: msg.conversations,
         conversationCount: msg.conversationCount,
         totalMessages: msg.totalMessages,
+        totalVoiceMessages: msg.totalVoiceMessages,
         wxDir: msg.wxDir,
         selfWxid: msg.selfWxid,
       };

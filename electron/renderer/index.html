@@ -122,11 +122,6 @@
                 <button id="autoDetectBtn" class="btn ghost step2-block-action" type="button">自动检测</button>
               </header>
 
-              <details class="step2-tip">
-                <summary>如何找到数据目录？</summary>
-                <p>打开微信「设置 → 账号与存储 → 存储位置」，进入该路径下的 <code>xwechat_files</code> 文件夹即可。</p>
-              </details>
-
               <label class="field step2-field">
                 <div class="input-row">
                   <input id="wxDir" type="text" placeholder="例如 D:\WeChat\xwechat_files" />
@@ -134,6 +129,11 @@
                 </div>
                 <small id="wxDirHint" class="hint">通常位于 Documents 或 D:\WeChat\xwechat_files</small>
               </label>
+
+              <details class="step2-tip">
+                <summary>如何找到数据目录？</summary>
+                <p>打开微信「设置 → 账号与存储 → 存储位置」，进入该路径下的 <code>xwechat_files</code> 文件夹即可。</p>
+              </details>
             </section>
 
             <section id="accountField" class="step2-block hidden" aria-labelledby="step2Block2Title">
@@ -145,11 +145,6 @@
                 <button id="refreshAccountsBtn" class="btn ghost step2-block-action" type="button">刷新</button>
               </header>
 
-              <details class="step2-tip">
-                <summary>为什么只显示 wxid？</summary>
-                <p>首次使用且尚未解密时，暂只显示 wxid；扫描会话后会自动解密并显示昵称和头像。</p>
-              </details>
-
               <div id="accountList" class="account-list"></div>
               <small id="accountHint" class="hint"></small>
 
@@ -160,6 +155,11 @@
                 </div>
                 <ul id="readinessSuggestions" class="readiness-list"></ul>
               </div>
+
+              <details class="step2-tip">
+                <summary>为什么只显示 wxid？</summary>
+                <p>首次使用且尚未解密时，暂只显示 wxid；扫描会话后会自动解密并显示昵称和头像。</p>
+              </details>
             </section>
 
             <section id="cacheSection" class="step2-block step2-block-cache hidden" aria-labelledby="step2Block3Title">
@@ -210,38 +210,66 @@
         <div class="card step2-card">
           <div class="step2-intro">
             <h2>导出设置</h2>
-            <p id="exportSummary" class="subhead">确认保存位置与格式，然后开始导出。</p>
           </div>
 
           <div class="step2-flow">
+            <section class="step2-block" aria-labelledby="step4OverviewTitle">
+              <header class="step2-block-head step2-block-head-compact">
+                <span class="step2-num" aria-hidden="true">1</span>
+                <div class="step2-block-title">
+                  <h3 id="step4OverviewTitle">导出总览</h3>
+                </div>
+              </header>
+
+              <p id="exportSummary" class="export-summary-line">确认保存位置与格式，然后开始导出。</p>
+              <p id="exportEstimateLine" class="export-time-line hidden"></p>
+
+              <details class="step2-tip">
+                <summary>预计时间怎么理解？</summary>
+                <ul class="step2-tip-list">
+                  <li>根据<strong>当前勾选的会话</strong>、消息数量、导出格式和本机运算速度估算；Lv.1–10 代表电脑处理快慢，数字越高越快</li>
+                  <li>显示的是<strong>参考区间</strong>，不是精确倒计时；磁盘、首次解密等因素可能让实际时间有所出入</li>
+                  <li>勾选语音转写后会明显变长；语音若此前已转过，重复导出会更快</li>
+                  <li>开始导出后，进度条旁会显示<strong>剩余时间</strong>，通常比这里的预估更准确</li>
+                </ul>
+              </details>
+            </section>
+
             <section class="step2-block" aria-labelledby="step4Block1Title">
               <header class="step2-block-head">
-                <span class="step2-num" aria-hidden="true">1</span>
+                <span class="step2-num" aria-hidden="true">2</span>
                 <div class="step2-block-title">
                   <h3 id="step4Block1Title">保存位置</h3>
                 </div>
                 <button id="pickOutputDir" class="btn ghost step2-block-action" type="button">浏览</button>
               </header>
 
-              <details class="step2-tip">
-                <summary>保存在哪里比较合适？</summary>
-                <p>建议选择空文件夹。导出完成后会自动生成 <code>index.html</code>、<code>conversations.json</code> 及按会话拆分的文件。</p>
-              </details>
-
               <label class="field step2-field">
                 <div class="input-row">
                   <input id="outputDir" type="text" placeholder="例如 D:\Documents\微信备份" />
                 </div>
               </label>
+
+              <details class="step2-tip">
+                <summary>保存在哪里比较合适？</summary>
+                <p>建议选择空文件夹。导出完成后会自动生成 <code>index.html</code>、<code>conversations.json</code> 及按会话拆分的文件。</p>
+              </details>
             </section>
 
             <section class="step2-block" aria-labelledby="step4Block2Title">
               <header class="step2-block-head">
-                <span class="step2-num" aria-hidden="true">2</span>
+                <span class="step2-num" aria-hidden="true">3</span>
                 <div class="step2-block-title">
                   <h3 id="step4Block2Title">导出格式</h3>
                 </div>
               </header>
+
+              <div class="format-grid">
+                <label class="format-chip"><input type="checkbox" name="format" value="html" checked /> HTML</label>
+                <label class="format-chip"><input type="checkbox" name="format" value="json" checked /> JSON</label>
+                <label class="format-chip"><input type="checkbox" name="format" value="txt" /> TXT</label>
+                <label class="format-chip"><input type="checkbox" name="format" value="csv" /> CSV</label>
+              </div>
 
               <details class="step2-tip">
                 <summary>各格式有什么用途？</summary>
@@ -252,22 +280,23 @@
                   <li><strong>CSV</strong> — 表格汇总，适合 Excel 分析</li>
                 </ul>
               </details>
-
-              <div class="format-grid">
-                <label class="format-chip"><input type="checkbox" name="format" value="html" checked /> HTML</label>
-                <label class="format-chip"><input type="checkbox" name="format" value="json" checked /> JSON</label>
-                <label class="format-chip"><input type="checkbox" name="format" value="txt" /> TXT</label>
-                <label class="format-chip"><input type="checkbox" name="format" value="csv" /> CSV</label>
-              </div>
             </section>
 
             <section id="voiceTranscriptionBlock" class="step2-block hidden" aria-labelledby="step4VoiceTitle">
               <header class="step2-block-head">
-                <span class="step2-num" aria-hidden="true">3</span>
+                <span id="step4VoiceNum" class="step2-num" aria-hidden="true">4</span>
                 <div class="step2-block-title">
                   <h3 id="step4VoiceTitle">语音转文字</h3>
                 </div>
               </header>
+
+              <div class="format-grid">
+                <label class="format-chip voice-chip">
+                  <input id="voiceTranscription" type="checkbox" name="voiceTranscription" />
+                  启用语音转文字
+                  <span id="voiceTimeHint" class="voice-time-hint"></span>
+                </label>
+              </div>
 
               <details class="step2-tip">
                 <summary>启用后有什么影响？</summary>
@@ -279,15 +308,11 @@
                   <li>识别准确率受口音、背景噪音影响，仅供参考</li>
                 </ul>
               </details>
-
-              <div class="format-grid">
-                <label class="format-chip"><input id="voiceTranscription" type="checkbox" name="voiceTranscription" /> 启用语音转文字</label>
-              </div>
             </section>
 
             <section class="step2-block step4-block-progress" aria-labelledby="step4Block3Title">
               <header class="step2-block-head">
-                <span id="step4BlockProgressNum" class="step2-num" aria-hidden="true">4</span>
+                <span id="step4BlockProgressNum" class="step2-num" aria-hidden="true">5</span>
                 <div class="step2-block-title">
                   <h3 id="step4Block3Title">导出进度</h3>
                 </div>

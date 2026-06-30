@@ -2,6 +2,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('exporter', {
   getAppInfo: () => ipcRenderer.invoke('get-app-info'),
+  estimateExport: (params) => ipcRenderer.invoke('estimate-export', params),
+  recordExportPerf: (sample) => ipcRenderer.invoke('record-export-perf', sample),
   detectWxPaths: () => ipcRenderer.invoke('detect-wx-paths'),
   pickDirectory: (options) => ipcRenderer.invoke('pick-directory', options),
   isDirectoryEmpty: (dirPath) => ipcRenderer.invoke('is-directory-empty', dirPath),
