@@ -1,6 +1,6 @@
 {
   "name": "wetrace",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "description": "微迹 Wetrace - 微信 PC 聊天记录导出工具",
   "main": "electron/main.js",
   "author": "",

@@ -98,6 +98,8 @@
             <span>我已阅读并理解上述说明，同意在本地使用本工具</span>
           </label>
 
+          <p class="hint welcome-footnote">遇到扫描失败？程序会自动保存诊断日志，可在失败提示中打开日志文件夹查看（不含聊天记录与密钥）。</p>
+
           <div class="actions">
             <button id="welcomeNextBtn" class="btn primary" type="button" disabled>开始导出</button>
           </div>
@@ -109,7 +111,6 @@
         <div class="card step2-card">
           <div class="step2-intro">
             <h2>选择微信账号</h2>
-            <p class="subhead">按顺序完成以下三步，然后扫描或加载会话列表。</p>
           </div>
 
           <div class="step2-flow">
@@ -359,6 +360,24 @@
             <span id="scanToastNote" class="scan-toast-note">首次扫描可能需要几分钟。若弹出微信，请点击「登录」</span>
           </div>
           <button id="cancelScanBtn" class="btn secondary" type="button">取消</button>
+        </div>
+      </div>
+
+      <div id="preflightModal" class="app-notice hidden" role="dialog" aria-modal="true" aria-labelledby="preflightModalTitle">
+        <div class="app-notice-backdrop" data-preflight-dismiss></div>
+        <div class="app-notice-card preflight-modal-card">
+          <div class="app-notice-body">
+            <h3 id="preflightModalTitle">环境检查</h3>
+            <div id="preflightModalLoading" class="preflight-modal-loading hidden">
+              <div class="spinner" aria-hidden="true"></div>
+              <span>检查中…</span>
+            </div>
+            <ul id="preflightModalList" class="preflight-list hidden"></ul>
+          </div>
+          <div class="app-notice-actions preflight-modal-actions confirm-mode">
+            <button id="preflightModalCancelBtn" class="btn secondary" type="button">取消</button>
+            <button id="preflightModalPrimaryBtn" class="btn primary" type="button">开始扫描</button>
+          </div>
         </div>
       </div>
 

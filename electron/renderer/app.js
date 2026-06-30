@@ -18,6 +18,12 @@ const readinessPanel = document.getElementById('readinessPanel');
 const readinessBadge = document.getElementById('readinessBadge');
 const readinessHint = document.getElementById('readinessHint');
 const readinessSuggestions = document.getElementById('readinessSuggestions');
+const preflightModal = document.getElementById('preflightModal');
+const preflightModalTitle = document.getElementById('preflightModalTitle');
+const preflightModalLoading = document.getElementById('preflightModalLoading');
+const preflightModalList = document.getElementById('preflightModalList');
+const preflightModalPrimaryBtn = document.getElementById('preflightModalPrimaryBtn');
+const preflightModalCancelBtn = document.getElementById('preflightModalCancelBtn');
 const autoDetectBtn = document.getElementById('autoDetectBtn');
 const refreshAccountsBtn = document.getElementById('refreshAccountsBtn');
 const scanBtn = document.getElementById('scanBtn');
@@ -666,25 +672,13 @@ function updateAccountProfileHint(accounts) {
   }
 }
 
-async function selectAccount(accountPath) {
+function selectAccount(accountPath) {
   selectedAccountPath = accountPath;
   resolvedAccountPath = accountPath;
   updateAccountCardSelection();
   saveSettings();
   accountHint.textContent = '';
-
-  const rootDir = wxDirInput.value.trim();
-  if (!rootDir) return;
-
-  const status = await window.exporter.checkWeChatStatus({
-    wxDir: rootDir,
-    accountPath,
-  });
-  if (status.ok) {
-    renderReadiness(status.readiness);
-  } else {
-    renderReadiness(null);
-  }
+  renderReadiness(null);
   void refreshConversationCacheHint();
 }
 
@@ -759,7 +753,7 @@ async function validateWxDir(dir, accountPath = null) {
   updateAccountCardSelection();
   wxDirHint.textContent = '';
   wxDirHint.className = 'hint';
-  renderReadiness(result.readiness);
+  renderReadiness(null);
   void refreshConversationCacheHint();
   return result;
 }
@@ -786,15 +780,6 @@ async function refreshWxAccountList({ silent = false } = {}) {
 
   try {
     await validateWxDir(rootDir, accountPath);
-    if (accountPath) {
-      const status = await window.exporter.checkWeChatStatus({
-        wxDir: rootDir,
-        accountPath,
-      });
-      if (status.ok) {
-        renderReadiness(status.readiness);
-      }
-    }
   } finally {
     if (!silent) {
       refreshAccountsBtn.disabled = scanRunning;
@@ -1075,7 +1060,196 @@ async function showFriendlyError(title, message, detail, tone) {
   });
 }
 
-function getExportOptions() {
+function buildScanFailureDetail(result) {
+  const parts = [];
+  if (result.feedbackSummary) {
+    parts.push(result.feedbackSummary);
+  } else if (result.logFileName) {
+    parts.push(`日志文件：${result.logFileName}`);
+  }
+  return parts.join('\n\n') || null;
+}
+
+async function showScanFailure(result) {
+  const errorInfo = result.errorInfo || {
+    code: 'WTR-E099',
+    title: '扫描失败',
+    userMessage: result.error || '扫描失败',
+  };
+  const action = await showAppNotice({
+    title: `${errorInfo.title}（${errorInfo.code}）`,
+    message: errorInfo.userMessage,
+    detail: buildScanFailureDetail(result),
+    tone: 'error',
+    confirm: true,
+    confirmLabel: '知道了',
+    cancelLabel: '打开日志文件夹',
+  });
+
+  if (action === false) {
+    await window.exporter.openLogDir();
+  }
+}
+
+let preflightModalResolve = null;
+let preflightModalSession = 0;
+
+function renderPreflightModalList(checks) {
+  preflightModalList.innerHTML = '';
+  const markMap = { pass: '✓', warn: '!', fail: '✕' };
+  for (const check of checks || []) {
+    const li = document.createElement('li');
+    li.className = `preflight-item ${check.level}`;
+    const mark = document.createElement('span');
+    mark.className = 'preflight-mark';
+    mark.textContent = markMap[check.level] || '•';
+    const body = document.createElement('div');
+    const title = document.createElement('strong');
+    title.textContent = check.label;
+    body.appendChild(title);
+    if (check.detail && check.level !== 'pass') {
+      const detail = document.createElement('span');
+      detail.textContent = check.detail;
+      body.appendChild(detail);
+    }
+    li.appendChild(mark);
+    li.appendChild(body);
+    preflightModalList.appendChild(li);
+  }
+}
+
+function closePreflightModal() {
+  preflightModal.classList.add('hidden');
+  preflightModalLoading.classList.add('hidden');
+  preflightModalList.classList.add('hidden');
+  preflightModalResolve = null;
+}
+
+function setPreflightModalButtons({ showStart = true, startEnabled = true } = {}) {
+  preflightModalPrimaryBtn.textContent = '开始扫描';
+  preflightModalCancelBtn.textContent = '取消';
+  preflightModalPrimaryBtn.classList.toggle('hidden', !showStart);
+  preflightModalPrimaryBtn.disabled = !startEnabled;
+  preflightModalCancelBtn.classList.remove('hidden');
+}
+
+function openPreflightModalLoading() {
+  const session = ++preflightModalSession;
+  preflightModalTitle.textContent = '环境检查';
+  preflightModalLoading.classList.remove('hidden');
+  preflightModalList.classList.add('hidden');
+  setPreflightModalButtons({ showStart: false });
+  preflightModal.classList.remove('hidden');
+  preflightModalCancelBtn.classList.remove('hidden');
+  return session;
+}
+
+function showPreflightModalChecks(preflight) {
+  preflightModalLoading.classList.add('hidden');
+  preflightModalList.classList.remove('hidden');
+  renderPreflightModalList(preflight.checks);
+  setPreflightModalButtons({
+    showStart: Boolean(preflight.ok),
+    startEnabled: Boolean(preflight.ok),
+  });
+}
+
+function showPreflightModalError(message) {
+  preflightModalLoading.classList.add('hidden');
+  preflightModalList.classList.remove('hidden');
+  preflightModalList.innerHTML = '';
+  const li = document.createElement('li');
+  li.className = 'preflight-item fail';
+  const mark = document.createElement('span');
+  mark.className = 'preflight-mark';
+  mark.textContent = '✕';
+  const body = document.createElement('div');
+  const title = document.createElement('strong');
+  title.textContent = '检查失败';
+  const detail = document.createElement('span');
+  detail.textContent = message;
+  body.appendChild(title);
+  body.appendChild(detail);
+  li.appendChild(mark);
+  li.appendChild(body);
+  preflightModalList.appendChild(li);
+  setPreflightModalButtons({ showStart: false });
+}
+
+function waitForPreflightModal(session) {
+  return new Promise((resolve) => {
+    if (session !== preflightModalSession) {
+      resolve(false);
+      return;
+    }
+    preflightModalResolve = resolve;
+  });
+}
+
+function finishPreflightModal(proceed) {
+  const resolve = preflightModalResolve;
+  preflightModalSession += 1;
+  closePreflightModal();
+  resolve?.(proceed);
+}
+
+function onPreflightModalPrimary() {
+  finishPreflightModal(true);
+}
+
+function onPreflightModalCancel() {
+  finishPreflightModal(false);
+}
+
+function onPreflightModalBackdrop(event) {
+  if (event.target?.matches?.('[data-preflight-dismiss]')) {
+    onPreflightModalCancel();
+  }
+}
+
+preflightModalPrimaryBtn.addEventListener('click', onPreflightModalPrimary);
+preflightModalCancelBtn.addEventListener('click', onPreflightModalCancel);
+preflightModal.addEventListener('click', onPreflightModalBackdrop);
+
+async function runDecryptPreflightGate(rootDir, accountPath) {
+  const session = openPreflightModalLoading();
+
+  let readiness = null;
+  try {
+    const status = await window.exporter.checkWeChatStatus({
+      wxDir: rootDir,
+      accountPath,
+    });
+    readiness = status.ok ? status.readiness : null;
+  } catch {
+    readiness = null;
+  }
+
+  if (session !== preflightModalSession) {
+    return false;
+  }
+
+  const result = await window.exporter.runPreflight({
+    wxDir: rootDir,
+    accountPath,
+    readiness,
+  });
+
+  if (session !== preflightModalSession) {
+    return false;
+  }
+
+  if (!result.checks?.length) {
+    showPreflightModalError(result.error || '无法完成环境检查');
+  } else {
+    showPreflightModalChecks(result);
+  }
+
+  const proceed = await waitForPreflightModal(session);
+  return proceed && result.ok;
+}
+
+function getExportOptions(extra = {}) {
   const accountPath = resolvedAccountPath || getSelectedAccountPath();
   const account = scannedAccounts.find((item) => item.path === accountPath);
   const cachedProfile = accountPath ? accountProfileCache.get(accountPath) : null;
@@ -1093,6 +1267,7 @@ function getExportOptions() {
     formats: getSelectedFormats(),
     selectedUsernames: getSelectedUsernames(),
     voiceTranscription: isVoiceTranscriptionEnabled(),
+    ...extra,
   };
 }
 
@@ -1579,6 +1754,24 @@ async function scanConversations() {
   resolvedAccountPath = accountPath;
   saveSettings();
 
+  const requirements = await window.exporter.getScanRequirements({
+    accountPath,
+    forceDecrypt: false,
+  });
+  if (!requirements.ok) {
+    await showFriendlyError('无法扫描', requirements.error || '请重新选择账号');
+    return;
+  }
+
+  let clientPreflightOk = false;
+  if (requirements.needsDecrypt) {
+    const passed = await runDecryptPreflightGate(rootDir, accountPath);
+    if (!passed) {
+      return;
+    }
+    clientPreflightOk = true;
+  }
+
   userCancelledScan = false;
   scanRunning = true;
   updateStepNavUI();
@@ -1587,7 +1780,9 @@ async function scanConversations() {
   showScanToast('正在扫描', '正在准备，请稍候…');
   startScanElapsedTimer();
 
-  const result = await window.exporter.scanConversations(getExportOptions());
+  const result = await window.exporter.scanConversations(
+    getExportOptions({ clientPreflightOk })
+  );
 
   scanRunning = false;
   updateStepNavUI();
@@ -1602,7 +1797,7 @@ async function scanConversations() {
 
   if (!result.ok) {
     scanBtn.textContent = currentConversationCache ? '重新扫描' : '扫描会话';
-    await showFriendlyError('扫描失败', result.error);
+    await showScanFailure(result);
     return;
   }
 

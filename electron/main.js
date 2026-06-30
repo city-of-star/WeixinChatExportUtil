@@ -11,6 +11,9 @@ const {
   listConversationCaches,
   updateCacheDisplayName,
 } = require('../lib/conversationCache');
+const { createScanSession, getLogDir, maskPath } = require('../lib/sessionLog');
+const { classifyScanError, buildFeedbackSummary } = require('../lib/errorCatalog');
+const { runPreflightChecks } = require('../lib/preflightCheck');
 
 let mainWindow = null;
 let exportRunning = false;
@@ -26,6 +29,26 @@ function getSettingsPath() {
 
 function getConversationCachePath() {
   return path.join(app.getPath('userData'), 'conversation-cache.json');
+}
+
+function getDiagnosticsLogDir() {
+  return getLogDir(app.getPath('userData'));
+}
+
+function buildScanSessionMeta(options = {}) {
+  const pkg = require('../package.json');
+  const { isDllHookAvailable } = require('../lib/wxKeyHook');
+  return {
+    app_version: app.getVersion() || pkg.version,
+    platform: process.platform,
+    arch: process.arch,
+    electron: process.versions.electron,
+    hook_dll: isDllHookAvailable() ? 'ok' : 'missing',
+    wx_dir: maskPath(options.wxDir || ''),
+    account_path: maskPath(options.accountPath || ''),
+    force_decrypt: options.forceDecrypt ? 'true' : 'false',
+    login_capture: options.loginCapture !== false ? 'true' : 'false',
+  };
 }
 
 function resolveAppIconPath() {
@@ -67,7 +90,7 @@ function sendProgress(payload) {
   }
 }
 
-function runScanWorker(options) {
+function runScanWorker(options, scanSession = null) {
   return new Promise((resolve, reject) => {
     if (scanWorker) {
       scanWorker.terminate().catch(() => {});
@@ -93,6 +116,13 @@ function runScanWorker(options) {
 
     worker.on('message', (msg) => {
       if (msg.type === 'progress') {
+        scanSession?.append('progress', {
+          phase: msg.event?.phase || '',
+          subphase: msg.event?.subphase || '',
+          current: msg.event?.current || '',
+          total: msg.event?.total || '',
+          message: msg.event?.message || '',
+        });
         sendProgress(msg.event);
       } else if (msg.type === 'done') {
         finish(resolve, msg);
@@ -100,6 +130,7 @@ function runScanWorker(options) {
     });
 
     worker.on('error', (err) => {
+      scanSession?.append('worker_error', { message: err.message, stack: err.stack || '' });
       finish(reject, err);
     });
 
@@ -110,7 +141,9 @@ function runScanWorker(options) {
         return;
       }
       if (code !== 0) {
-        finish(reject, new Error(`扫描任务异常退出 (code ${code})`));
+        const err = new Error(`扫描任务异常退出 (code ${code})`);
+        scanSession?.append('worker_exit', { code: String(code), message: err.message });
+        finish(reject, err);
       }
     });
   });
@@ -285,9 +318,7 @@ ipcMain.handle('validate-wx-dir', async (_event, payload) => {
     if (status.needsAccountSelection) {
       return { ok: true, ...status, readiness: null };
     }
-    const { checkWeChatReadiness } = require('../lib/wechatStatus');
-    const readiness = checkWeChatReadiness(status.resolved);
-    return { ok: true, ...status, readiness };
+    return { ok: true, ...status, readiness: null };
   } catch (err) {
     return { ok: false, error: err.message };
   }
@@ -365,15 +396,127 @@ ipcMain.handle('list-conversation-caches', async () => {
   }
 });
 
+ipcMain.handle('get-scan-requirements', async (_event, payload) => {
+  try {
+    const { needsDecrypt, hasDecryptedStorage } = require('../lib/decryptCore');
+    const accountPath = payload?.accountPath;
+    if (!accountPath) {
+      return { ok: false, error: '未选择账号' };
+    }
+    const forceDecrypt = Boolean(payload?.forceDecrypt);
+    return {
+      ok: true,
+      accountPath,
+      needsDecrypt: needsDecrypt(accountPath, forceDecrypt),
+      hasDecrypted: hasDecryptedStorage(accountPath),
+    };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('run-preflight', async (_event, payload) => {
+  try {
+    const result = runPreflightChecks({
+      wxDir: payload?.wxDir,
+      accountPath: payload?.accountPath || null,
+      readiness: payload?.readiness || null,
+    });
+    return { ok: true, ...result };
+  } catch (err) {
+    return { ok: false, error: err.message, checks: [] };
+  }
+});
+
+ipcMain.handle('get-log-dir', async () => {
+  const logDir = getDiagnosticsLogDir();
+  fs.mkdirSync(logDir, { recursive: true });
+  return { ok: true, logDir };
+});
+
+ipcMain.handle('open-log-dir', async () => {
+  const logDir = getDiagnosticsLogDir();
+  fs.mkdirSync(logDir, { recursive: true });
+  await shell.openPath(logDir);
+  return { ok: true, logDir };
+});
+
 ipcMain.handle('scan-conversations', async (_event, options) => {
   if (scanRunning) {
     return { ok: false, error: '扫描正在进行中' };
   }
 
   scanRunning = true;
+  const scanSession = createScanSession(app.getPath('userData'), buildScanSessionMeta(options));
+  scanSession.append('scan_start', { message: '开始扫描会话' });
+
+  const { needsDecrypt } = require('../lib/decryptCore');
+  const accountPath = options?.accountPath || null;
+  const mustDecrypt =
+    accountPath && needsDecrypt(accountPath, Boolean(options?.forceDecrypt));
+  const clientPreflightOk = Boolean(options?.clientPreflightOk);
+
+  let preflight = null;
+  if (mustDecrypt && !clientPreflightOk) {
+    try {
+      preflight = runPreflightChecks({
+        wxDir: options?.wxDir,
+        accountPath,
+      });
+      scanSession.append('preflight', {
+        ok: preflight.ok ? 'true' : 'false',
+        blocking: preflight.blocking.map((item) => item.id).join(','),
+        warnings: preflight.warnings.map((item) => item.id).join(','),
+      });
+      for (const check of preflight.checks) {
+        scanSession.append('preflight_check', {
+          id: check.id,
+          level: check.level,
+          label: check.label,
+          detail: check.detail,
+        });
+      }
+
+      if (!preflight.ok) {
+        const errorInfo = {
+          code: 'WTR-P001',
+          title: '环境检查未通过',
+          userMessage:
+            '扫描前环境检查未通过，请先处理以下问题：\n\n' +
+            preflight.blockingMessage,
+          suggestions: preflight.blocking.map((item) => item.detail || item.label).filter(Boolean),
+          rawMessage: preflight.blockingMessage,
+        };
+        scanSession.finalize({
+          ok: false,
+          code: errorInfo.code,
+          message: errorInfo.rawMessage,
+        });
+        return {
+          ok: false,
+          error: errorInfo.userMessage,
+          errorInfo,
+          feedbackSummary: buildFeedbackSummary(errorInfo, scanSession.fileName),
+          logFileName: scanSession.fileName,
+          logDir: scanSession.logDir,
+          preflight,
+          preflightBlocked: true,
+        };
+      }
+    } catch (err) {
+      scanSession.append('preflight_error', { message: err.message });
+    }
+  } else {
+    scanSession.append('preflight', {
+      skipped: mustDecrypt ? 'client_verified' : 'decrypt_not_required',
+      needs_decrypt: mustDecrypt ? 'true' : 'false',
+    });
+  }
+
   try {
-    const msg = await runScanWorker(options);
+    const msg = await runScanWorker(options, scanSession);
     if (msg.ok) {
+      scanSession.finalize({ ok: true, code: 'OK', message: 'scan completed' });
       const accountPath = options.accountPath || msg.wxDir;
       saveConversationCache(getConversationCachePath(), accountPath, {
         conversationCount: msg.conversationCount,
@@ -391,14 +534,68 @@ ipcMain.handle('scan-conversations', async (_event, options) => {
         totalVoiceMessages: msg.totalVoiceMessages,
         wxDir: msg.wxDir,
         selfWxid: msg.selfWxid,
+        logFileName: scanSession.fileName,
+        logDir: scanSession.logDir,
       };
     }
-    return { ok: false, error: msg.error, cancelled: Boolean(msg.cancelled) };
+
+    const errorInfo = classifyScanError(new Error(msg.error || '扫描失败'));
+    scanSession.append('scan_error', {
+      code: errorInfo.code,
+      raw: errorInfo.rawMessage,
+      message: msg.error || '',
+    });
+    scanSession.finalize({
+      ok: false,
+      code: errorInfo.code,
+      message: errorInfo.rawMessage,
+      cancelled: Boolean(msg.cancelled),
+    });
+
+    return {
+      ok: false,
+      error: errorInfo.userMessage,
+      errorInfo,
+      feedbackSummary: buildFeedbackSummary(errorInfo, scanSession.fileName),
+      cancelled: Boolean(msg.cancelled),
+      logFileName: scanSession.fileName,
+      logDir: scanSession.logDir,
+      preflight,
+    };
   } catch (err) {
     if (scanCancelRequested) {
-      return { ok: false, cancelled: true, error: '扫描已取消' };
+      scanSession.finalize({ ok: false, code: 'WTR-E009', message: '扫描已取消', cancelled: true });
+      return {
+        ok: false,
+        cancelled: true,
+        error: '扫描已取消',
+        logFileName: scanSession.fileName,
+        logDir: scanSession.logDir,
+      };
     }
-    return { ok: false, error: err.message };
+
+    const errorInfo = classifyScanError(err);
+    scanSession.append('scan_error', {
+      code: errorInfo.code,
+      raw: errorInfo.rawMessage,
+      message: err.message,
+      stack: err.stack || '',
+    });
+    scanSession.finalize({
+      ok: false,
+      code: errorInfo.code,
+      message: errorInfo.rawMessage,
+    });
+
+    return {
+      ok: false,
+      error: errorInfo.userMessage,
+      errorInfo,
+      feedbackSummary: buildFeedbackSummary(errorInfo, scanSession.fileName),
+      logFileName: scanSession.fileName,
+      logDir: scanSession.logDir,
+      preflight,
+    };
   } finally {
     scanRunning = false;
     scanWorker = null;
