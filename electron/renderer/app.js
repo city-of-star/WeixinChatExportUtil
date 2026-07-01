@@ -1307,6 +1307,15 @@ function friendlyScanMessage(event) {
 
   if (phase === 'scan' && event.subphase === 'counting' && event.total) {
     const current = event.current || 0;
+    if (event.countingScope === 'message_dbs') {
+      if (msg.includes('增量更新')) {
+        return msg;
+      }
+      return `正在统计消息库 ${current} / ${event.total}`;
+    }
+    if (event.countingScope === 'sessions' && current >= event.total) {
+      return event.message || `已统计 ${formatCount(current)} 个会话候选`;
+    }
     return `已统计 ${formatCount(current)} / ${formatCount(event.total)} 个会话`;
   }
 
@@ -1787,14 +1796,22 @@ async function deleteConversationCache(accountPath, scanId) {
   void refreshConversationCacheHint();
 }
 
-function applyConversationScanResult(result, { fromCache = false } = {}) {
+function applyConversationScanResult(result, { fromCache = false, unchanged = false, incremental = null } = {}) {
   renderConversationList(result.conversations || []);
   setStep(3);
-  appendLog(
-    fromCache
-      ? `已加载缓存：${formatScanStatsSummary(result)}`
-      : `扫描完成：${formatScanStatsSummary(result)}`
-  );
+
+  let logMessage;
+  if (unchanged) {
+    logMessage = `微信数据未变化，已加载上次扫描：${formatScanStatsSummary(result)}`;
+  } else if (fromCache) {
+    logMessage = `已加载缓存：${formatScanStatsSummary(result)}`;
+  } else if (incremental?.reusedDbCount > 0) {
+    logMessage = `增量扫描完成（复用 ${incremental.reusedDbCount} 个消息库）：${formatScanStatsSummary(result)}`;
+  } else {
+    logMessage = `扫描完成：${formatScanStatsSummary(result)}`;
+  }
+
+  appendLog(logMessage);
   void refreshSelectionSummary();
 }
 
@@ -1940,7 +1957,11 @@ async function scanConversations() {
     return;
   }
 
-  applyConversationScanResult(result);
+  applyConversationScanResult(result, {
+    fromCache: Boolean(result.fromCache),
+    unchanged: Boolean(result.unchanged),
+    incremental: result.incremental || null,
+  });
   scanBtn.textContent = '重新扫描';
 
   if (rootDir && resolvedAccountPath) {

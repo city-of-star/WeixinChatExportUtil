@@ -23,6 +23,8 @@ async function scanConversations(options) {
       wxDir,
       selfWxid: options.selfWxid || null,
       skipDecrypt: true,
+      incrementalBase: options.incrementalBase || null,
+      forceFullScan: forceDecrypt,
       onProgress: (event) => {
         if (cancelled) return;
         postProgress(event);

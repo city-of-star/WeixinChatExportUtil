@@ -6,6 +6,8 @@ const { resolveWxDir, getWxDirStatus } = require('../lib/exportCore');
 const { detectWeChatDataPaths } = require('../lib/wxPathDetect');
 const {
   getConversationCache,
+  getLatestConversationCache,
+  isCacheCurrent,
   saveConversationCache,
   clearConversationCache,
   listConversationCaches,
@@ -560,18 +562,56 @@ ipcMain.handle('scan-conversations', async (_event, options) => {
   }
 
   try {
-    const msg = await runScanWorker(options, scanSession);
+    const forceDecrypt = Boolean(options?.forceDecrypt);
+    const resolvedAccountPath = accountPath || options?.wxDir || null;
+    let latestCache = null;
+
+    if (resolvedAccountPath && !forceDecrypt) {
+      latestCache = getLatestConversationCache(getConversationCachePath(), resolvedAccountPath);
+      if (latestCache && isCacheCurrent(latestCache, resolvedAccountPath)) {
+        scanSession.append('scan_skip', { reason: 'fingerprint_unchanged' });
+        scanSession.finalize({ ok: true, code: 'OK', message: 'cache reused' });
+        return {
+          ok: true,
+          unchanged: true,
+          fromCache: true,
+          conversations: latestCache.conversations,
+          conversationCount: latestCache.conversationCount,
+          totalMessages: latestCache.totalMessages,
+          totalVoiceMessages: latestCache.totalVoiceMessages,
+          wxDir: resolvedAccountPath,
+          selfWxid: latestCache.selfWxid,
+          logFileName: scanSession.fileName,
+          logDir: scanSession.logDir,
+        };
+      }
+    }
+
+    const scanOptions = {
+      ...options,
+      incrementalBase:
+        latestCache?.dbStats && !forceDecrypt ? { dbStats: latestCache.dbStats } : null,
+    };
+
+    const msg = await runScanWorker(scanOptions, scanSession);
     if (msg.ok) {
       scanSession.finalize({ ok: true, code: 'OK', message: 'scan completed' });
-      const accountPath = options.accountPath || msg.wxDir;
-      saveConversationCache(getConversationCachePath(), accountPath, {
+      const saveAccountPath = options.accountPath || msg.wxDir;
+      saveConversationCache(getConversationCachePath(), saveAccountPath, {
         conversationCount: msg.conversationCount,
         totalMessages: msg.totalMessages,
         totalVoiceMessages: msg.totalVoiceMessages,
         selfWxid: msg.selfWxid,
         displayName: options.displayName || null,
         conversations: msg.conversations,
+        dbStats: msg.dbStats || null,
       });
+      if (msg.incremental?.reusedDbCount > 0) {
+        scanSession.append('scan_incremental', {
+          reused_db_count: String(msg.incremental.reusedDbCount),
+          rescanned_db_count: String(msg.incremental.rescannedDbCount),
+        });
+      }
       return {
         ok: true,
         conversations: msg.conversations,
@@ -580,6 +620,7 @@ ipcMain.handle('scan-conversations', async (_event, options) => {
         totalVoiceMessages: msg.totalVoiceMessages,
         wxDir: msg.wxDir,
         selfWxid: msg.selfWxid,
+        incremental: msg.incremental || null,
         logFileName: scanSession.fileName,
         logDir: scanSession.logDir,
       };
