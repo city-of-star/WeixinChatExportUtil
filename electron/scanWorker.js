@@ -14,7 +14,9 @@ function postProgress(event) {
 
 async function scanConversations(options) {
   const { resolveWxDir, listConversations } = require('../lib/exportCore');
+  const { needsDecrypt, ensureDecrypted, hasDecryptedStorage } = require('../lib/decryptCore');
   const wxDir = resolveWxDir(options.wxDir, { accountPath: options.accountPath });
+  const forceDecrypt = Boolean(options.forceDecrypt);
 
   const listOnce = async () =>
     listConversations({
@@ -27,26 +29,40 @@ async function scanConversations(options) {
       },
     });
 
+  const decryptOptions = {
+    wxDir,
+    forceDecrypt,
+    loginCapture: options.loginCapture !== false,
+    keysPath: options.keysPath || null,
+    onProgress: (event) => {
+      if (cancelled) return;
+      postProgress(event);
+    },
+  };
+
+  if (needsDecrypt(wxDir, forceDecrypt)) {
+    if (hasDecryptedStorage(wxDir)) {
+      postProgress({ phase: 'scan', message: '检测到微信数据有更新，正在同步…' });
+    } else {
+      postProgress({ phase: 'scan', message: '首次扫描需要解密，可能需要几分钟…' });
+    }
+
+    await ensureDecrypted(decryptOptions);
+    if (cancelled) throw new Error('扫描已取消');
+  }
+
+  postProgress({ phase: 'scan', message: '正在读取会话列表…' });
+
   try {
-    postProgress({ phase: 'scan', message: '正在读取会话列表…' });
     return await listOnce();
   } catch (firstErr) {
     if (cancelled) throw new Error('扫描已取消');
+    if (!hasDecryptedStorage(wxDir)) {
+      throw firstErr;
+    }
 
-    postProgress({ phase: 'scan', message: '首次扫描需要解密，可能需要几分钟…' });
-    const { ensureDecrypted } = require('../lib/decryptCore');
-
-    await ensureDecrypted({
-      wxDir,
-      forceDecrypt: Boolean(options.forceDecrypt),
-      loginCapture: options.loginCapture !== false,
-      keysPath: options.keysPath || null,
-      onProgress: (event) => {
-        if (cancelled) return;
-        postProgress(event);
-      },
-    });
-
+    postProgress({ phase: 'scan', message: '读取失败，正在重新解密…' });
+    await ensureDecrypted({ ...decryptOptions, forceDecrypt: true });
     if (cancelled) throw new Error('扫描已取消');
 
     postProgress({ phase: 'scan', message: '解密完成，正在统计会话…' });

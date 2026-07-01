@@ -357,9 +357,9 @@ ipcMain.handle('check-wechat-status', async (_event, payload) => {
   }
 });
 
-ipcMain.handle('load-conversation-cache', async (_event, { accountPath }) => {
+ipcMain.handle('load-conversation-cache', async (_event, { accountPath, scanId }) => {
   try {
-    const cache = getConversationCache(getConversationCachePath(), accountPath);
+    const cache = getConversationCache(getConversationCachePath(), accountPath, scanId || null);
     if (!cache) {
       return { ok: true, cache: null };
     }
@@ -369,9 +369,9 @@ ipcMain.handle('load-conversation-cache', async (_event, { accountPath }) => {
   }
 });
 
-ipcMain.handle('clear-conversation-cache', async (_event, { accountPath }) => {
+ipcMain.handle('clear-conversation-cache', async (_event, { accountPath, scanId }) => {
   try {
-    clearConversationCache(getConversationCachePath(), accountPath);
+    clearConversationCache(getConversationCachePath(), accountPath, scanId || null);
     return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };

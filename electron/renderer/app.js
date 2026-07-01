@@ -1412,6 +1412,10 @@ function friendlyScanNote(event) {
     return '正在逐个统计消息数量，数据量较大时可能需要较长时间，请耐心等待。';
   }
 
+  if (phase === 'scan' && msg.includes('有更新')) {
+    return '正在重新解密微信数据库以同步最新聊天记录，请保持微信处于登录状态。';
+  }
+
   return '首次扫描可能需要几分钟。若弹出微信，请点击「登录」';
 }
 
@@ -1532,8 +1536,10 @@ async function enrichCacheAccountProfiles(caches) {
 async function refreshConversationCacheHint() {
   const selectedPath = getSelectedAccountPath();
   const result = await window.exporter.listConversationCaches();
-  if (!result.ok || !result.caches?.length) {
-    conversationCacheEntries = [];
+  const allCaches = result.ok && result.caches?.length ? result.caches : [];
+  conversationCacheEntries = allCaches;
+
+  if (!selectedPath || !allCaches.length) {
     currentConversationCache = null;
     cacheSection.classList.add('hidden');
     cacheList.innerHTML = '';
@@ -1541,31 +1547,33 @@ async function refreshConversationCacheHint() {
     return;
   }
 
-  conversationCacheEntries = result.caches;
-  currentConversationCache = selectedPath
-    ? result.caches.find((item) => item.accountPath === selectedPath) || null
-    : null;
+  const accountCaches = allCaches.filter((item) => item.accountPath === selectedPath);
+  if (!accountCaches.length) {
+    currentConversationCache = null;
+    cacheSection.classList.add('hidden');
+    cacheList.innerHTML = '';
+    scanBtn.textContent = '扫描会话';
+    return;
+  }
 
-  await enrichCacheAccountProfiles(result.caches);
-  renderConversationCacheList(result.caches, selectedPath);
+  currentConversationCache = accountCaches[0] || null;
+
+  await enrichCacheAccountProfiles(accountCaches);
+  renderConversationCacheList(accountCaches);
   cacheSection.classList.remove('hidden');
-
-  const selectedCache = currentConversationCache;
-  scanBtn.textContent = selectedCache ? '重新扫描' : '扫描会话';
+  scanBtn.textContent = '重新扫描';
 }
 
-function renderConversationCacheList(caches, selectedPath) {
+function renderConversationCacheList(caches) {
   cacheList.innerHTML = '';
 
   for (const cache of caches) {
     const item = document.createElement('div');
     item.className = 'cache-item';
-    if (cache.accountPath === selectedPath) {
-      item.classList.add('selected');
-    }
 
     const label = getAccountLabel(cache.accountPath, cache);
     const profile = accountProfileCache.get(cache.accountPath);
+    const scannedAt = formatCacheTime(cache.scannedAt);
 
     if (profile?.avatar) {
       const img = document.createElement('img');
@@ -1585,12 +1593,11 @@ function renderConversationCacheList(caches, selectedPath) {
 
     const title = document.createElement('div');
     title.className = 'cache-item-title';
-    title.textContent = label;
+    title.textContent = scannedAt || label;
 
     const meta = document.createElement('div');
     meta.className = 'cache-item-meta';
-    const scannedAt = formatCacheTime(cache.scannedAt);
-    meta.textContent = `${formatScanStatsSummary(cache)}${scannedAt ? ` · ${scannedAt}` : ''}`;
+    meta.textContent = formatScanStatsSummary(cache);
 
     info.appendChild(title);
     info.appendChild(meta);
@@ -1603,13 +1610,13 @@ function renderConversationCacheList(caches, selectedPath) {
     useBtn.className = 'btn secondary';
     useBtn.type = 'button';
     useBtn.textContent = '使用';
-    useBtn.addEventListener('click', () => useCachedConversations(cache.accountPath));
+    useBtn.addEventListener('click', () => useCachedConversations(cache.accountPath, cache.id));
 
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'btn ghost danger-text';
     deleteBtn.type = 'button';
     deleteBtn.textContent = '删除';
-    deleteBtn.addEventListener('click', () => deleteConversationCache(cache.accountPath));
+    deleteBtn.addEventListener('click', () => deleteConversationCache(cache.accountPath, cache.id));
 
     actions.appendChild(useBtn);
     actions.appendChild(deleteBtn);
@@ -1633,7 +1640,7 @@ async function handleResetAccountDecryptData() {
   const label = getAccountLabel(accountPath, {});
   const confirmed = await showConfirmDialog({
     title: '重置解密数据',
-    message: `清除「${label}」的解密缓存？需重新解密。`,
+    message: `清除「${label}」的密钥与解密缓存？此操作用于故障排查，完成后需重新解密。`,
     tone: 'warn',
     confirmLabel: '重置',
     dangerConfirm: true,
@@ -1660,7 +1667,7 @@ async function handleResetAccountDecryptData() {
 
   await showAppNotice({
     title: '已重置',
-    message: '请重新点击「扫描会话」完成解密。',
+    message: '解密缓存已清除。请重新点击「扫描会话」完成解密。',
     tone: 'guide',
   });
 }
@@ -1720,8 +1727,10 @@ async function handleResetAppData() {
   });
 }
 
-async function deleteConversationCache(accountPath) {
-  let cache = conversationCacheEntries.find((item) => item.accountPath === accountPath);
+async function deleteConversationCache(accountPath, scanId) {
+  let cache =
+    conversationCacheEntries.find((item) => item.accountPath === accountPath && item.id === scanId) ||
+    conversationCacheEntries.find((item) => item.accountPath === accountPath);
   const wxid = getWxidFromPath(accountPath, cache?.selfWxid);
   if (
     cache &&
@@ -1729,12 +1738,17 @@ async function deleteConversationCache(accountPath) {
     !isRealDisplayName(accountProfileCache.get(accountPath)?.displayName, wxid)
   ) {
     await enrichCacheAccountProfiles([cache]);
-    cache = conversationCacheEntries.find((item) => item.accountPath === accountPath) || cache;
+    cache =
+      conversationCacheEntries.find((item) => item.accountPath === accountPath && item.id === scanId) ||
+      cache;
   }
   const label = getAccountLabel(accountPath, cache || {});
+  const scannedAt = formatCacheTime(cache?.scannedAt);
   const confirmed = await showConfirmDialog({
     title: '确认删除',
-    message: `确定删除「${label}」的历史扫描记录吗？`,
+    message: scannedAt
+      ? `确定删除「${label}」在 ${scannedAt} 的扫描记录吗？`
+      : `确定删除「${label}」的这条扫描记录吗？`,
     tone: 'warn',
     confirmLabel: '删除',
     dangerConfirm: true,
@@ -1743,13 +1757,13 @@ async function deleteConversationCache(accountPath) {
     return;
   }
 
-  const result = await window.exporter.clearConversationCache({ accountPath });
+  const result = await window.exporter.clearConversationCache({ accountPath, scanId });
   if (!result.ok) {
     await showFriendlyError('删除失败', result.error || '无法删除扫描缓存');
     return;
   }
 
-  if (getSelectedAccountPath() === accountPath) {
+  if (currentConversationCache?.id === scanId) {
     currentConversationCache = null;
   }
   void refreshConversationCacheHint();
@@ -1792,7 +1806,7 @@ function renderOutputGuide(formats) {
   outputGuide.innerHTML = `<strong>文件说明</strong><ul>${items.map((item) => `<li>${item}</li>`).join('')}</ul>`;
 }
 
-async function useCachedConversations(accountPath = null) {
+async function useCachedConversations(accountPath = null, scanId = null) {
   const targetPath = accountPath || getSelectedAccountPath();
   if (!targetPath) {
     await showFriendlyError('请选择账号', '请先选择要导出的微信账号。');
@@ -1809,9 +1823,12 @@ async function useCachedConversations(accountPath = null) {
     await selectAccount(targetPath);
   }
 
-  const cacheResult = await window.exporter.loadConversationCache({ accountPath: targetPath });
+  const cacheResult = await window.exporter.loadConversationCache({
+    accountPath: targetPath,
+    scanId: scanId || null,
+  });
   if (!cacheResult.ok || !cacheResult.cache?.conversations?.length) {
-    await showFriendlyError('缓存不可用', '未找到该账号的历史扫描记录，请重新扫描。');
+    await showFriendlyError('缓存不可用', '未找到该扫描记录，请重新扫描。');
     void refreshConversationCacheHint();
     return;
   }
