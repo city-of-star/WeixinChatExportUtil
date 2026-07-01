@@ -27,7 +27,7 @@ const preflightModalCancelBtn = document.getElementById('preflightModalCancelBtn
 const autoDetectBtn = document.getElementById('autoDetectBtn');
 const refreshAccountsBtn = document.getElementById('refreshAccountsBtn');
 const resetDecryptBtn = document.getElementById('resetDecryptBtn');
-const resetAppDataBtn = document.getElementById('resetAppDataBtn');
+const resetAllToolTracesBtn = document.getElementById('resetAllToolTracesBtn');
 const scanBtn = document.getElementById('scanBtn');
 const step1Panel = document.getElementById('step1Panel');
 const step2Panel = document.getElementById('step2Panel');
@@ -1672,29 +1672,51 @@ async function handleResetAccountDecryptData() {
   });
 }
 
-async function handleResetAppData() {
+async function handleResetAllToolTraces() {
   if (scanRunning || exportRunning) {
     await showFriendlyError('请稍候', '请等待当前任务结束。');
     return;
   }
 
+  const selectedAccountPath = getSelectedAccountPath();
+
   const confirmed = await showConfirmDialog({
-    title: '重置应用数据',
-    message: '清除设置、诊断日志和历史扫描记录？',
+    title: '清除全部工具痕迹',
+    message:
+      '将清除所有曾扫描账号目录中的密钥、解密库与语音转写缓存，并清除 App 设置、扫描记录与诊断日志。不会删除已导出的聊天记录。此操作不可恢复。',
     tone: 'warn',
-    confirmLabel: '重置',
+    confirmLabel: '清除',
     dangerConfirm: true,
   });
   if (!confirmed) {
     return;
   }
 
-  const result = await window.exporter.resetAppData();
+  const additionalAccountPaths = selectedAccountPath ? [selectedAccountPath] : [];
+  const result = await window.exporter.resetAllToolTraces({ additionalAccountPaths });
   if (!result.ok) {
-    await showFriendlyError('重置失败', result.error || '操作失败');
+    await showFriendlyError('清除失败', result.error || '操作失败');
     return;
   }
 
+  applyLocalAppReset({ persistSettingsFile: false });
+
+  const action = await showAppNotice({
+    title: '已清除',
+    message:
+      '若需彻底卸载，请先关闭应用，再手动删除 App 数据目录中的所有文件。',
+    tone: 'guide',
+    confirm: true,
+    confirmLabel: '知道了',
+    cancelLabel: '打开 App 数据目录',
+  });
+
+  if (action === false) {
+    await window.exporter.openUserDataDir();
+  }
+}
+
+function applyLocalAppReset({ persistSettingsFile = true } = {}) {
   wxDirInput.value = '';
   outputDirInput.value = '';
   selectedAccountPath = null;
@@ -1718,13 +1740,9 @@ async function handleResetAppData() {
 
   const minimalSettings = { disclaimerAccepted: disclaimerAccepted.checked };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(minimalSettings));
-  window.exporter.saveSettings(minimalSettings).catch(() => {});
-
-  await showAppNotice({
-    title: '已重置',
-    message: '请重新选择微信数据目录。',
-    tone: 'guide',
-  });
+  if (persistSettingsFile) {
+    window.exporter.saveSettings(minimalSettings).catch(() => {});
+  }
 }
 
 async function deleteConversationCache(accountPath, scanId) {
@@ -2086,8 +2104,8 @@ resetDecryptBtn?.addEventListener('click', () => {
   void handleResetAccountDecryptData();
 });
 
-resetAppDataBtn?.addEventListener('click', () => {
-  void handleResetAppData();
+resetAllToolTracesBtn?.addEventListener('click', () => {
+  void handleResetAllToolTraces();
 });
 
 autoDetectBtn.addEventListener('click', async () => {

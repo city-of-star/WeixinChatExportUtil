@@ -441,6 +441,13 @@ ipcMain.handle('open-log-dir', async () => {
   return { ok: true, logDir };
 });
 
+ipcMain.handle('open-user-data-dir', async () => {
+  const userDataPath = app.getPath('userData');
+  fs.mkdirSync(userDataPath, { recursive: true });
+  await shell.openPath(userDataPath);
+  return { ok: true, userDataPath };
+});
+
 ipcMain.handle('reset-account-decrypt-data', async (_event, payload) => {
   if (scanRunning || exportRunning) {
     return { ok: false, error: '扫描或导出进行中，请稍后再试' };
@@ -459,16 +466,20 @@ ipcMain.handle('reset-account-decrypt-data', async (_event, payload) => {
   }
 });
 
-ipcMain.handle('reset-app-data', async () => {
+ipcMain.handle('reset-all-tool-traces', async (_event, payload) => {
   if (scanRunning || exportRunning) {
     return { ok: false, error: '扫描或导出进行中，请稍后再试' };
   }
   try {
-    const { resetAppData } = require('../lib/dataReset');
+    const { resetAllToolTraces } = require('../lib/dataReset');
     const userDataPath = app.getPath('userData');
-    const result = resetAppData(userDataPath, {
+    const additionalAccountPaths = Array.isArray(payload?.additionalAccountPaths)
+      ? payload.additionalAccountPaths
+      : [];
+    const result = resetAllToolTraces(userDataPath, {
       conversationCachePath: getConversationCachePath(),
       settingsPath: getSettingsPath(),
+      additionalAccountPaths,
     });
     return { ok: true, ...result };
   } catch (err) {
