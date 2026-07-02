@@ -4,6 +4,7 @@ const wxDirInput = document.getElementById('wxDir');
 const accountField = document.getElementById('accountField');
 const accountList = document.getElementById('accountList');
 const accountHint = document.getElementById('accountHint');
+const multiAccountTip = document.getElementById('multiAccountTip');
 const scanToast = document.getElementById('scanToast');
 const scanToastTitle = document.getElementById('scanToastTitle');
 const scanToastMessage = document.getElementById('scanToastMessage');
@@ -756,6 +757,43 @@ function updateAccountCardSelection() {
   }
 }
 
+function formatRelativeActivityTime(ms) {
+  if (!ms) {
+    return '暂无数据活动记录';
+  }
+  const date = new Date(ms);
+  if (Number.isNaN(date.getTime())) {
+    return '暂无数据活动记录';
+  }
+
+  const diffSec = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (diffSec < 60) {
+    return '刚刚有数据活动';
+  }
+  if (diffSec < 3600) {
+    return `${Math.floor(diffSec / 60)} 分钟前有数据活动`;
+  }
+  if (diffSec < 86400) {
+    return `${Math.floor(diffSec / 3600)} 小时前有数据活动`;
+  }
+  if (diffSec < 86400 * 30) {
+    return `${Math.floor(diffSec / 86400)} 天前有数据活动`;
+  }
+
+  const label = date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+  });
+  return `${label} 有数据活动`;
+}
+
+function updateMultiAccountTip(accounts) {
+  if (!multiAccountTip) return;
+  const show = accounts.length > 1;
+  multiAccountTip.classList.toggle('hidden', !show);
+}
+
 function getAccountStatusClass(account) {
   if (account.mode === 'decrypted') return 'decrypted';
   if (account.mode === 'encrypted') return 'encrypted';
@@ -770,6 +808,7 @@ function renderAccountOptions(accounts, selectedPath = null) {
     accountField.classList.add('hidden');
     selectedAccountPath = null;
     accountHint.textContent = '';
+    updateMultiAccountTip([]);
     return;
   }
 
@@ -797,23 +836,40 @@ function renderAccountOptions(accounts, selectedPath = null) {
     const info = document.createElement('div');
     info.className = 'account-info';
 
+    const header = document.createElement('div');
+    header.className = 'account-header';
+
     const nameEl = document.createElement('div');
     nameEl.className = 'account-name';
     nameEl.textContent = account.displayName || account.wxid;
     nameEl.title = nameEl.textContent;
 
-    const wxidEl = document.createElement('div');
-    wxidEl.className = 'account-wxid';
-    wxidEl.textContent = account.wxid;
-    wxidEl.title = account.wxid;
-
     const statusEl = document.createElement('span');
     statusEl.className = `account-status ${getAccountStatusClass(account)}`;
     statusEl.textContent = account.description || '未知状态';
 
-    info.appendChild(nameEl);
-    info.appendChild(wxidEl);
-    info.appendChild(statusEl);
+    header.appendChild(nameEl);
+    header.appendChild(statusEl);
+
+    const meta = document.createElement('div');
+    meta.className = 'account-meta';
+
+    if (isRealDisplayName(account.displayName, account.wxid)) {
+      const wxidEl = document.createElement('div');
+      wxidEl.className = 'account-wxid';
+      wxidEl.textContent = account.wxid;
+      wxidEl.title = account.wxid;
+      meta.appendChild(wxidEl);
+    }
+
+    const activityEl = document.createElement('div');
+    activityEl.className = 'account-activity';
+    activityEl.textContent = formatRelativeActivityTime(account.lastActivityAt);
+    activityEl.title = account.lastActivityAtIso || activityEl.textContent;
+    meta.appendChild(activityEl);
+
+    info.appendChild(header);
+    info.appendChild(meta);
     card.appendChild(info);
 
     card.addEventListener('click', () => selectAccount(account.path));
@@ -829,6 +885,7 @@ function renderAccountOptions(accounts, selectedPath = null) {
   }
 
   updateAccountCardSelection();
+  updateMultiAccountTip(scannedAccounts);
   accountHint.textContent =
     scannedAccounts.length > 1 && !selectedAccountPath ? '请选择要导出的账号' : '';
 }
