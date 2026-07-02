@@ -93,7 +93,25 @@ const accountProfileCache = new Map();
 let profileLoadToken = 0;
 let estimateRequestId = 0;
 let exportStartedAt = 0;
-let voicePhaseStartedAt = 0;
+let exportTaskTotal = 0;
+let exportTaskExported = 0;
+let exportTaskVoiceEnabled = false;
+let exportTaskVoiceTotal = 0;
+let exportTaskVoiceDone = 0;
+let exportTaskMessageTotal = 0;
+let exportTaskMessageDone = 0;
+let exportTaskMessagePartial = 0;
+let exportPrepRatio = 0;
+let exportDisplayPercent = 0;
+let exportEtaSmoothSec = null;
+let exportEtaDisplayed = null;
+let exportEtaLastUpdate = 0;
+let exportLastEtaPercent = 0;
+
+const EXPORT_PREP_MAX = 10;
+const EXPORT_WORK_SPAN = 88;
+const EXPORT_ETA_MIN_ELAPSED_SEC = 15;
+const EXPORT_ETA_UPDATE_MS = 5000;
 
 function isRealDisplayName(displayName, wxid) {
   return Boolean(displayName && displayName !== wxid);
@@ -334,14 +352,22 @@ function formatRemaining(seconds) {
   if (!Number.isFinite(seconds) || seconds <= 0) {
     return null;
   }
-  if (seconds < 20) {
+  if (seconds < 45) {
     return '即将完成';
   }
-  if (seconds < 120) {
-    const rounded = Math.max(20, Math.round(seconds / 10) * 10);
-    return `约还需 ${rounded} 秒`;
+  const mins = Math.ceil(seconds / 60);
+  if (mins <= 1) {
+    return '约 1 分钟';
   }
-  return `约还需 ${Math.max(1, Math.round(seconds / 60))} 分钟`;
+  if (mins < 60) {
+    return `约还需 ${mins} 分钟`;
+  }
+  const hours = Math.floor(mins / 60);
+  const restMins = mins % 60;
+  if (restMins === 0) {
+    return `约还需 ${hours} 小时`;
+  }
+  return `约还需 ${hours} 小时 ${restMins} 分钟`;
 }
 
 function getSelectionStats() {
@@ -496,44 +522,227 @@ async function refreshSelectionSummary({ voiceTranscription = null, highlight = 
   }
 }
 
-function getDynamicEtaSuffix(event) {
+function resetExportTaskProgress() {
+  exportTaskTotal = 0;
+  exportTaskExported = 0;
+  exportTaskVoiceEnabled = false;
+  exportTaskVoiceTotal = 0;
+  exportTaskVoiceDone = 0;
+  exportTaskMessageTotal = 0;
+  exportTaskMessageDone = 0;
+  exportTaskMessagePartial = 0;
+  exportPrepRatio = 0;
+  exportDisplayPercent = 0;
+  exportEtaSmoothSec = null;
+  exportEtaDisplayed = null;
+  exportEtaLastUpdate = 0;
+  exportLastEtaPercent = 0;
+}
+
+function initExportTaskProgress(options, stats) {
+  exportTaskTotal = Math.max(1, options.selectedUsernames?.length || 0);
+  exportTaskExported = 0;
+  exportTaskVoiceEnabled = Boolean(options.voiceTranscription);
+  exportTaskVoiceTotal = exportTaskVoiceEnabled ? Math.max(0, stats.voiceCount || 0) : 0;
+  exportTaskVoiceDone = 0;
+  exportTaskMessageTotal = Math.max(1, stats.messageCount || 0);
+  exportTaskMessageDone = 0;
+  exportTaskMessagePartial = 0;
+  exportPrepRatio = 0;
+  exportDisplayPercent = 0;
+  exportEtaSmoothSec = null;
+  exportEtaDisplayed = null;
+  exportEtaLastUpdate = 0;
+  exportLastEtaPercent = 0;
+}
+
+function updateExportTaskFromEvent(event) {
+  const phase = event?.phase || '';
+
+  if (phase === 'init') {
+    exportPrepRatio = Math.max(exportPrepRatio, 0.03);
+    return;
+  }
+  if (phase === 'keys') {
+    exportPrepRatio = Math.max(exportPrepRatio, 0.06);
+    return;
+  }
+  if (phase === 'decrypt') {
+    if (event.current && event.total) {
+      exportPrepRatio = event.current / event.total;
+    } else {
+      exportPrepRatio = Math.max(exportPrepRatio, 0.08);
+    }
+    return;
+  }
+  if (phase === 'voice-transcription' || phase === 'exporting' || phase === 'done') {
+    exportPrepRatio = 1;
+  }
+  if (phase === 'exporting') {
+    exportTaskTotal = event.totalCandidates || exportTaskTotal;
+    if (event.subphase === 'reading' && event.chatMessagesTotal) {
+      exportTaskMessagePartial = event.chatMessagesDone || 0;
+    } else if (event.subphase === 'start') {
+      exportTaskMessagePartial = 0;
+    } else if (!event.subphase || event.subphase === 'writing') {
+      exportTaskExported = event.current || exportTaskExported;
+      exportTaskMessageDone = event.totalMessages ?? exportTaskMessageDone;
+      exportTaskMessagePartial = 0;
+    }
+    return;
+  }
+  if (phase === 'voice-transcription') {
+    if (event.subphase === 'transcribing' && event.total) {
+      exportTaskVoiceDone = event.current || 0;
+      exportTaskVoiceTotal = Math.max(exportTaskVoiceTotal, event.total);
+    } else if (event.subphase === 'done') {
+      exportTaskVoiceDone = exportTaskVoiceTotal;
+    }
+    return;
+  }
+  if (phase === 'done') {
+    exportTaskExported = event.conversationCount || exportTaskExported;
+  }
+}
+
+function getMessageWorkRatio() {
+  if (exportTaskMessageTotal <= 0) {
+    return exportTaskTotal > 0 ? exportTaskExported / exportTaskTotal : 0;
+  }
+  const done = exportTaskMessageDone + exportTaskMessagePartial;
+  return Math.min(1, done / exportTaskMessageTotal);
+}
+
+function computeExportWorkRatio() {
+  const messageRatio = getMessageWorkRatio();
+  const convRatio = exportTaskTotal > 0 ? exportTaskExported / exportTaskTotal : 0;
+  if (exportTaskVoiceEnabled && exportTaskVoiceTotal > 0) {
+    const voiceRatio = exportTaskVoiceDone / exportTaskVoiceTotal;
+    return messageRatio * 0.08 + voiceRatio * 0.88 + convRatio * 0.04;
+  }
+  return messageRatio;
+}
+
+function computeRawExportPercent() {
+  const workRatio = computeExportWorkRatio();
+  const prepPart =
+    workRatio > 0 || exportPrepRatio >= 1
+      ? EXPORT_PREP_MAX
+      : exportPrepRatio * EXPORT_PREP_MAX;
+  const workPart = workRatio * EXPORT_WORK_SPAN;
+  return Math.min(98, prepPart + workPart);
+}
+
+function bumpExportDisplayPercent(rawPercent) {
+  exportDisplayPercent = Math.max(exportDisplayPercent, rawPercent);
+  return exportDisplayPercent;
+}
+
+function buildExportProgressText(event) {
+  const phase = event?.phase || '';
+  const pct = Math.round(exportDisplayPercent);
+
+  if (phase === 'init' || phase === 'keys') {
+    return `总进度 ${pct}% · ${event.message || '准备中…'}`;
+  }
+  if (phase === 'decrypt') {
+    if (event.current && event.total) {
+      return `总进度 ${pct}% · 解密数据（${event.current}/${event.total}）`;
+    }
+    return `总进度 ${pct}% · ${event.message || '正在解密…'}`;
+  }
+  if (phase === 'voice-transcription') {
+    if (event.subphase === 'model-load') {
+      return `总进度 ${pct}% · 正在加载语音识别模型…`;
+    }
+    if (event.subphase === 'transcribing' && event.total) {
+      const detail =
+        exportTaskTotal > 0
+          ? `会话 ${exportTaskExported}/${exportTaskTotal} · 语音 ${event.current}/${event.total}`
+          : `语音 ${event.current}/${event.total}`;
+      return `总进度 ${pct}% · ${detail}`;
+    }
+    return `总进度 ${pct}% · ${event.message || '语音转写…'}`;
+  }
+  if (phase === 'exporting') {
+    if (event.subphase === 'reading' && event.chatMessagesTotal) {
+      return `总进度 ${pct}% · 正在读取 ${event.displayName}（${formatCount(event.chatMessagesDone)}/${formatCount(event.chatMessagesTotal)} 条）`;
+    }
+    if (event.subphase === 'start') {
+      return `总进度 ${pct}% · 正在处理 ${event.displayName}（${event.scanned}/${event.totalCandidates}）`;
+    }
+    return `总进度 ${pct}% · 已处理 ${formatCount(exportTaskMessageDone)} 条 · ${event.displayName || ''}`;
+  }
+  if (phase === 'done') {
+    return `总进度 100% · 完成 ${event.conversationCount} 个会话，${formatCount(event.totalMessages)} 条消息`;
+  }
+  return `总进度 ${pct}%`;
+}
+
+function computeExportTotalProgress(event) {
+  updateExportTaskFromEvent(event);
+  const phase = event?.phase || '';
+
+  if (phase === 'done') {
+    exportDisplayPercent = 100;
+    return {
+      percent: 100,
+      text: buildExportProgressText(event),
+    };
+  }
+
+  const percent = bumpExportDisplayPercent(computeRawExportPercent());
+  return {
+    percent,
+    text: buildExportProgressText(event),
+  };
+}
+
+function getDynamicEtaSuffix() {
   if (!exportRunning || !exportStartedAt) {
     return null;
   }
+
   const elapsedSec = (Date.now() - exportStartedAt) / 1000;
-  if (elapsedSec < 8) {
+  if (elapsedSec < EXPORT_ETA_MIN_ELAPSED_SEC || exportDisplayPercent < 5) {
     return null;
   }
 
-  if (event.phase === 'exporting') {
-    const done = event.scanned || 0;
-    const total = event.totalCandidates || 0;
-    if (done <= 0 || total <= 0 || done >= total) {
-      return null;
-    }
-    const rate = done / elapsedSec;
-    return formatRemaining((total - done) / rate);
+  const ratio = exportDisplayPercent / 100;
+  if (ratio < 0.05 || ratio >= 0.99) {
+    return null;
   }
 
-  if (event.phase === 'voice-transcription' && event.subphase === 'transcribing') {
-    if (!voicePhaseStartedAt) {
-      voicePhaseStartedAt = Date.now();
-    }
-    const voiceElapsed = (Date.now() - voicePhaseStartedAt) / 1000;
-    const current = event.current || 0;
-    const total = event.total || 0;
-    if (voiceElapsed < 5 || current <= 1 || total <= 0 || current >= total) {
-      return null;
-    }
-    const rate = current / voiceElapsed;
-    return formatRemaining((total - current) / rate);
+  if (exportDisplayPercent <= exportLastEtaPercent) {
+    return exportEtaDisplayed;
   }
 
-  return null;
+  const rawRemaining = (elapsedSec / ratio) * (1 - ratio);
+  if (!Number.isFinite(rawRemaining) || rawRemaining <= 0) {
+    return exportEtaDisplayed;
+  }
+
+  exportLastEtaPercent = exportDisplayPercent;
+
+  if (exportEtaSmoothSec === null) {
+    exportEtaSmoothSec = rawRemaining;
+  } else {
+    const blended = exportEtaSmoothSec * 0.75 + rawRemaining * 0.25;
+    exportEtaSmoothSec = Math.max(exportEtaSmoothSec * 0.92, blended);
+  }
+
+  const now = Date.now();
+  if (exportEtaDisplayed && now - exportEtaLastUpdate < EXPORT_ETA_UPDATE_MS) {
+    return exportEtaDisplayed;
+  }
+
+  exportEtaLastUpdate = now;
+  exportEtaDisplayed = formatRemaining(exportEtaSmoothSec);
+  return exportEtaDisplayed;
 }
 
-function setProgressWithEta(percent, text, event) {
-  const eta = event ? getDynamicEtaSuffix(event) : null;
+function setProgressWithEta(percent, text) {
+  const eta = getDynamicEtaSuffix();
   setProgress(percent, eta ? `${text} · ${eta}` : text);
 }
 
@@ -2002,17 +2211,17 @@ async function startExport() {
 
   exportRunning = true;
   exportStartedAt = Date.now();
-  voicePhaseStartedAt = 0;
+  const exportStats = getSelectionStats();
+  resetExportTaskProgress();
+  initExportTaskProgress(options, exportStats);
   updateStepNavUI();
   startBtn.disabled = true;
   cancelBtn.classList.remove('hidden');
   openOutputBtn.disabled = true;
   logEl.textContent = '';
-  setProgress(0, '准备中…');
+  setProgress(0, '总进度 0% · 准备中…');
   appendLog('开始导出…');
   saveSettings();
-
-  const exportStats = getSelectionStats();
   const preEstimate = await window.exporter.estimateExport({
     ...exportStats,
     formatCount: Math.max(1, options.formats.length),
@@ -2038,7 +2247,6 @@ async function startExport() {
   const exportDurationSec = Math.max(1, (Date.now() - exportStartedAtMs) / 1000);
   exportRunning = false;
   exportStartedAt = 0;
-  voicePhaseStartedAt = 0;
   updateStepNavUI();
   cancelBtn.classList.add('hidden');
   startBtn.disabled = false;
@@ -2059,16 +2267,40 @@ async function startExport() {
     } else {
       openIndexBtn.classList.add('hidden');
     }
-    setProgress(100, '导出完成');
+    setProgress(100, '总进度 100% · 导出完成');
     successSummary.textContent = `共导出 ${result.result.conversationCount} 个会话，${formatCount(result.result.totalMessages)} 条消息${result.result.voiceTranscription ? '（含语音转文字）' : ''}。\n文件已保存到：${result.result.outputDir}`;
     renderOutputGuide(options.formats);
     setStep(5);
+    resetExportTaskProgress();
   } else if (result.cancelled) {
-    setProgress(0, '已取消');
-    appendLog('导出已取消');
+    const partial = exportTaskExported;
+    const outputDir = options.outputDir;
+    if (partial > 0) {
+      setProgress(exportDisplayPercent, `已取消 · 已导出 ${partial}/${exportTaskTotal} 个会话`);
+      appendLog(`导出已取消。已完成的 ${partial} 个会话文件仍保留在：${outputDir}`);
+      appendLog('未生成完整的 index.html / conversations.json，重新导出可补全。');
+      const open = await showConfirmDialog({
+        title: '导出已取消',
+        message: `已成功导出 ${partial} 个会话，文件保留在所选目录。`,
+        detail:
+          '未生成完整的 index.html / conversations.json。如需完整备份，可重新导出（建议选空文件夹，或确认不会覆盖需要的文件）。',
+        tone: 'guide',
+        confirmLabel: '打开文件夹',
+        cancelLabel: '知道了',
+        preferCancel: true,
+      });
+      if (open) {
+        window.exporter.openPath(outputDir);
+      }
+    } else {
+      setProgress(0, '已取消');
+      appendLog('导出已取消');
+    }
+    resetExportTaskProgress();
   } else {
     setProgress(0, '导出失败');
     appendLog(`错误: ${result.error}`);
+    resetExportTaskProgress();
     await showFriendlyError(
       '导出失败',
       result.error,
@@ -2245,7 +2477,9 @@ voiceTranscriptionInput?.addEventListener('change', () => {
 });
 
 window.exporter.onProgress((event) => {
-  if (event.phase === 'scan' || event.phase === 'init' || event.phase === 'decrypt' || event.phase === 'keys') {
+  const phase = event.phase;
+
+  if (phase === 'scan' || phase === 'init' || phase === 'decrypt' || phase === 'keys') {
     if (scanRunning) {
       showScanToast(
         friendlyScanTitle(event),
@@ -2253,38 +2487,34 @@ window.exporter.onProgress((event) => {
         friendlyScanNote(event)
       );
     }
-    if (event.phase !== 'scan') {
+    if (exportRunning) {
+      const progress = computeExportTotalProgress(event);
+      if (progress) {
+        setProgressWithEta(progress.percent, progress.text);
+      }
+      if (event.message) {
+        appendLog(event.message);
+      }
+    } else if (phase !== 'scan' && event.message) {
       appendLog(event.message);
     }
-  } else if (event.phase === 'exporting') {
-    const percent = event.totalCandidates
-      ? 25 + Math.round((event.scanned / event.totalCandidates) * 75)
-      : 25;
-    setProgressWithEta(
-      percent,
-      `正在导出 ${event.displayName}（${event.current}/${event.totalCandidates}）`,
-      event
-    );
-    if (event.current % 5 === 0) {
+    return;
+  }
+
+  if (exportRunning && (phase === 'exporting' || phase === 'voice-transcription' || phase === 'done')) {
+    const progress = computeExportTotalProgress(event);
+    if (progress) {
+      setProgressWithEta(progress.percent, progress.text);
+    }
+    if (phase === 'exporting' && event.current % 5 === 0) {
       appendLog(`已导出 ${event.current} 个会话，累计 ${formatCount(event.totalMessages)} 条消息`);
+    } else if (phase === 'voice-transcription' && event.message) {
+      appendLog(event.message);
     }
-  } else if (event.phase === 'voice-transcription') {
-    progressText.classList.add('running');
-    if (event.subphase === 'model-load') {
-      voicePhaseStartedAt = 0;
-      setProgress(8, '正在加载语音识别模型…');
-    } else if (event.subphase === 'transcribing' && event.total) {
-      const pct = 12 + Math.round((event.current / event.total) * 78);
-      setProgressWithEta(pct, event.message || '正在转写语音…', event);
-    } else if (event.subphase === 'done') {
-      setProgress(92, event.message || '语音转写完成');
-    } else {
-      setProgress(10, event.message || '准备语音转写…');
-    }
-    appendLog(event.message);
-  } else if (event.phase === 'done') {
-    setProgress(100, `完成：${event.conversationCount} 个会话，${formatCount(event.totalMessages)} 条消息`);
-  } else if (event.phase === 'error') {
+    return;
+  }
+
+  if (phase === 'error') {
     appendLog(`错误: ${event.message}`);
   }
 });
