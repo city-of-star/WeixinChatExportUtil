@@ -48,14 +48,14 @@
 
 ### 方式一：下载便携版（推荐）
 
-从 [Releases](../../releases) 页面下载 `微迹 Wetrace-2.1.0-portable.exe`（版本号以 Releases 为准），**右键 → 以管理员身份运行**。
+从 [Releases](https://github.com/city-of-star/Wetrace/releases) 页面下载 `微迹 Wetrace-2.1.0-portable.exe`（版本号以 Releases 为准），**右键 → 以管理员身份运行**。
 
 ### 方式二：从源码运行
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/city-of-star/WexinChatExportUtil.git
-cd WexinChatExportUtil
+git clone https://github.com/city-of-star/Wetrace.git
+cd Wetrace
 
 # 2. 安装依赖
 npm install
@@ -160,7 +160,7 @@ npm run download-whisper-model -- --insecure
 ## 项目结构
 
 ```
-WexinChatExportUtil/
+Wetrace/
 ├── electron/              # Electron 主进程与渲染进程
 │   ├── main.js            # 主进程入口
 │   ├── preload.js         # 上下文桥接
