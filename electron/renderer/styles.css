@@ -993,7 +993,7 @@ select:focus {
 
 .preflight-modal-card .preflight-list {
   margin-top: 8px;
-  max-height: 300px;
+  max-height: 520px;
   overflow: auto;
 }
 
