@@ -2068,7 +2068,7 @@ function applyConversationScanResult(result, { fromCache = false, unchanged = fa
 
   let logMessage;
   if (unchanged) {
-    logMessage = `微信数据未变化，已加载上次扫描：${formatScanStatsSummary(result)}`;
+    logMessage = `数据未变化，已复用上次的会话列表：${formatScanStatsSummary(result)}`;
   } else if (fromCache) {
     logMessage = `已加载缓存：${formatScanStatsSummary(result)}`;
   } else if (incremental?.reusedDbCount > 0) {
